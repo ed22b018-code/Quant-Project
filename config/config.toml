@@ -1,0 +1,150 @@
+# config/config.toml — single source of truth for all runtime settings.
+# Loaded via src/config.py (stdlib tomllib + pydantic v2).
+# All paths are relative to the project root.
+
+[project]
+name    = "quant-fin"
+version = "0.1.0"
+
+# ── Data sources ──────────────────────────────────────────────────────────────
+[data]
+# Primary historical source for daily bars.
+# "nse_bhavcopy"     = official NSE end-of-day CSV files (survivorship-documentable).
+# "dhan_historical"  = Dhan intraday/daily bars stored in ohlcv_intraday table.
+# NOTE: Every backtest report MUST flag whether it ran on 'daily' or 'minute' data.
+# Intraday-edge conclusions require minute-level data (dhan_historical or supplied dataset).
+historical_source = "dhan_historical"
+
+# Live data source for the paper-trading engine.
+# "dhan"   = Dhan WebSocket feed (requires DHAN_CLIENT_ID + DHAN_ACCESS_TOKEN in .env).
+# "upstox" = Upstox free-tier WebSocket (requires UPSTOX_API_KEY + UPSTOX_ACCESS_TOKEN).
+# Swap to "upstox" after Dhan subscription expires — no code changes needed, config only.
+live_data_source = "dhan"
+
+data_dir      = "data"
+snapshots_dir = "data/snapshots"
+duckdb_path   = "data/market.duckdb"
+sqlite_path   = "data/state.db"
+
+# ── Dhan API ──────────────────────────────────────────────────────────────────
+[dhan]
+# Credentials are NEVER stored here — read from .env:
+#   DHAN_CLIENT_ID=...
+#   DHAN_ACCESS_TOKEN=...
+#
+# TODO (on key arrival): set DHAN_ADJUSTMENT_STATUS in .env to confirm whether
+# Dhan historical data is pre-adjusted for corporate actions:
+#   DHAN_ADJUSTMENT_STATUS=PRE_ADJUSTED    (if Dhan adjusts server-side — likely)
+#   DHAN_ADJUSTMENT_STATUS=RAW             (if unadjusted — apply our layer)
+# Until set, DhanDataSource warns on every historical query.
+
+base_url             = "https://api.dhan.co/v2"
+instrument_master_url = "https://images.dhan.co/api-data/api-scrip-master.csv"
+
+# Bulk downloader pacing (respect Dhan's rate limits).
+request_delay_seconds = 1.0    # sleep between consecutive API calls
+max_retries           = 3      # per-chunk retry attempts before marking FAILED
+days_per_chunk        = 90     # Dhan historical API cap per request (~90 calendar days)
+backoff_base_seconds  = 1.0    # exponential backoff base for 429/5xx errors
+
+# ── Stock universe ────────────────────────────────────────────────────────────
+[universe]
+# NSE F&O segment — STATIC list for Phase 0.
+#
+# IMPORTANT: The actual F&O eligibility list changes quarterly (NSE adds/removes
+# scrips based on liquidity criteria). This list was assembled from the NSE F&O
+# underlyings list as of mid-2025.
+#
+# Phase 1 TODO: replace with dynamic eligibility query from:
+#   https://www.nseindia.com/products-services/equity-derivatives-list-underlyings-information
+#
+# Symbols use NSE ticker format.  "M&M" and "BAJAJ-AUTO" contain special chars —
+# these are the official NSE symbols and must not be normalised away.
+
+symbols = [
+  # ── NIFTY 50 ──────────────────────────────────────────────────────────────
+  "ADANIENT",   "ADANIPORTS",  "APOLLOHOSP",  "ASIANPAINT",  "AXISBANK",
+  "BAJAJ-AUTO", "BAJAJFINSV",  "BAJFINANCE",  "BHARTIARTL",  "BPCL",
+  "BRITANNIA",  "CIPLA",       "COALINDIA",   "DIVISLAB",    "DRREDDY",
+  "EICHERMOT",  "GRASIM",      "HCLTECH",     "HDFCBANK",    "HDFCLIFE",
+  "HEROMOTOCO", "HINDALCO",    "HINDUNILVR",  "ICICIBANK",   "INDUSINDBK",
+  "INFY",       "ITC",         "JSWSTEEL",    "KOTAKBANK",   "LT",
+  "M&M",        "MARUTI",      "NESTLEIND",   "NTPC",        "ONGC",
+  "POWERGRID",  "RELIANCE",    "SBILIFE",     "SBIN",        "SHREECEM",
+  "SUNPHARMA",  "TATAMOTORS",  "TATASTEEL",   "TCS",         "TATACONSUM",
+  "TECHM",      "TITAN",       "ULTRACEMCO",  "UPL",         "WIPRO",
+  # ── Additional F&O stocks ─────────────────────────────────────────────────
+  "ABB",        "ACC",         "AMBUJACEM",   "AUROPHARMA",  "BALKRISIND",
+  "BANDHANBNK", "BANKBARODA",  "BATAINDIA",   "BEL",         "BHEL",
+  "BIOCON",     "BOSCHLTD",    "CANBK",       "CHOLAFIN",    "CONCOR",
+  "CUMMINSIND", "DMART",       "ESCORTS",     "EXIDEIND",    "FEDERALBNK",
+  "GAIL",       "GODREJCP",    "GRANULES",    "HAL",         "HAVELLS",
+  "IDFCFIRSTB", "IGL",         "INDHOTEL",    "INDIGO",      "IRCTC",
+  "JUBLFOOD",   "KPITTECH",    "LICHSGFIN",   "LTIM",        "LUPIN",
+  "MANAPPURAM", "MCDOWELL-N",  "MGL",         "MOTHERSON",   "MPHASIS",
+  "MUTHOOTFIN", "NATIONALUM",  "NAUKRI",      "NMDC",        "OFSS",
+  "PAGEIND",    "PERSISTENT",  "PETRONET",    "PFC",         "PIIND",
+  "PNB",        "POLYCAB",     "RBLBANK",     "RECLTD",      "RVNL",
+  "SAIL",       "SIEMENS",     "TATAELXSI",   "TATAPOWER",   "TORNTPHARM",
+  "TRENT",      "TVSMOTOR",    "VEDL",        "VOLTAS",      "ZOMATO",
+]
+
+# ── Trading / paper engine ────────────────────────────────────────────────────
+[trading]
+# Virtual rupees.  NEVER hard-code this value anywhere else in the codebase.
+# All sizing, risk, and P&L calculations must read from config.trading.token_pool.
+token_pool = 500_000
+
+# Prediction horizons.  primary_horizon_min is the default output; all three are
+# always produced so the "cone must widen with horizon" property can be validated.
+primary_horizon_min      = 30
+additional_horizons_min  = [15, 60]
+
+# NSE continuous session.  Pre-open auction (09:00–09:15) excluded from tick features.
+market_open    = "09:15"
+market_close   = "15:30"
+square_off_time = "15:15"   # MIS positions auto-squared off before 15:30
+
+# Hard guardrails from DESIGN.md §12 — cannot be overridden at runtime.
+max_position_pct           = 0.10   # max 10 % of pool per trade
+max_intraday_exposure_pct  = 0.40   # max 40 % total intraday exposure
+max_delivery_exposure_pct  = 0.50   # max 50 % delivery exposure
+min_cash_reserve_pct       = 0.10   # always keep ≥ 10 % cash
+drawdown_pause_pct         = 0.20   # pause new entries if pool drops 20 % from peak
+max_sector_exposure_pct    = 0.25   # no single sector > 25 % exposure
+
+# ── Model / ML ────────────────────────────────────────────────────────────────
+[model]
+random_seed = 42   # fixed for reproducibility (DESIGN.md rule 5)
+
+# Quantile levels for the LightGBM cone.
+# Must include 0.50 (median = expected drift); outer bands validated for coverage.
+quantile_levels = [0.10, 0.25, 0.50, 0.75, 0.90]
+
+# ── Seed weights ──────────────────────────────────────────────────────────────
+# Research-backed initial weights for NSE intraday F&O universe.
+# Applied at cold-start (day one) and during ramp-up (n_obs < min_observations_per_label).
+# Weights NEVER hand-tuned against backtest results.  Changes require the validation
+# gate to pass on held-out data.
+[model.seeds]
+market_regime  = 0.25   # Nifty/VIX regime — dominant NSE intraday factor
+fo_signals     = 0.25   # PCR, OI, max-pain, basis — India-specific documented edge
+price_momentum = 0.20   # Momentum/microstructure — decays fast in liquid stocks
+sentiment      = 0.15   # FinBERT — noisy but non-zero in mid-caps
+institutional  = 0.10   # FII/DII EOD context + sector relative strength (slow-moving)
+calendar       = 0.05   # Open-auction effect + time-of-day bucket
+
+# Gating: all three gates must pass before a weight update is accepted
+min_observations_per_label           = 50      # per class label in live validation set
+max_weight_change_per_update         = 0.05    # no group moves >5% in one weekly cycle
+validation_gate_min_brier_improvement = 0.005  # must beat prior Brier score by >=0.5%
+shrinkage_factor                     = 0.5     # blend toward seed when n_obs < minimum
+
+# ── Experiment tracking ───────────────────────────────────────────────────────
+[experiment]
+db_path = "data/runs.db"   # SQLite; every run records config hash + metrics
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+[logging]
+level   = "INFO"
+log_dir = "logs"

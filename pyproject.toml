@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "quant-fin"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Personal intraday research & paper-trading system for NSE/BSE stocks"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "backtester*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts   = "-v --tb=short"
+# Adds project root to sys.path so 'from src.X import Y' works without pip install -e .
+pythonpath = ["."]
+
+[tool.ruff]
+line-length    = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]    # pycodestyle errors, pyflakes, isort
+ignore = ["E501"]                 # line-length handled by black
+
+[tool.black]
+line-length    = 100
+target-version = ["py311"]

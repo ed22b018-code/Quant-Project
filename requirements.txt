@@ -1,0 +1,53 @@
+# ─── requirements.txt ─────────────────────────────────────────────────────────
+# Exact pins for the Phase 0 environment (Python 3.14.5, generated 2026-06-20).
+# To rebuild: python -m venv .venv && pip install -r requirements.txt
+# The project must rebuild on another machine from this file alone (DESIGN.md §2 rule 6).
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Phase 0: core storage & config (pinned) ───────────────────────────────────
+annotated-types==0.7.0
+duckdb==1.5.4
+numpy==2.4.6
+pandas==3.0.3
+pydantic==2.13.4
+pydantic_core==2.46.4
+python-dateutil==2.9.0.post0
+six==1.17.0
+typing_extensions==4.15.0
+typing-inspection==0.4.2
+tzdata==2026.2
+
+# ── Phase 0: testing (pinned) ─────────────────────────────────────────────────
+colorama==0.4.6
+coverage==7.14.1
+iniconfig==2.3.0
+packaging==26.2
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.1.1
+pytest-cov==7.1.0
+
+# ── Phase 1: data feeds (install when wiring Phase 1) ─────────────────────────
+# requests
+feedparser==6.0.12    # RSS news parsing
+# websocket-client
+# upstox-python-api    # Upstox broker free-tier tick feed + option chain
+
+# ── Phase 2: ML + calibration (installed for Checkpoints 2.3+2.4) ────────────
+joblib==1.5.3
+lightgbm==4.6.0
+scikit-learn==1.9.0
+scipy==1.18.0
+threadpoolctl==3.6.0
+# shap                 # install when wiring Checkpoint 2.6 (SHAP pruning)
+# transformers         # install when wiring FinBERT (Checkpoint 2.2)
+# tokenizers           # transitive dep of transformers
+# torch                # CPU-only (no GPU):  pip install torch --index-url https://download.pytorch.org/whl/cpu
+#                       # GPU (CUDA 12.1):   pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# ── Phase 5: dashboard (install when wiring Phase 5) ─────────────────────────
+# streamlit
+
+# ── Code quality (optional, for development) ─────────────────────────────────
+# ruff
+# black

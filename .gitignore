@@ -1,0 +1,43 @@
+# ── Secrets — NEVER commit these ─────────────────────────────────────────────
+.env
+*.key
+*.pem
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Data files (large; versioned separately as snapshots) ────────────────────
+data/*.duckdb
+data/*.db
+data/snapshots/
+logs/
+!data/.gitkeep
+!logs/.gitkeep
+
+# ── Python artefacts ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Test / coverage artefacts ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Trained model artefacts (large; live on training machine only) ────────────
+# /models/ anchors to root only — does NOT affect src/models/ (source code)
+/models/
+*.pkl
+*.lgb
+*.orchestration_state.json
+
+# ── IDE / OS ──────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.DS_Store
+Thumbs.db
