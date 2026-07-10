@@ -323,27 +323,26 @@ class TestOrchestrator:
 # ── GPU detection ──────────────────────────────────────────────────────────────
 
 class TestDetectLgbmDevice:
-    def test_returns_cpu_when_torch_unavailable(self, monkeypatch):
-        import builtins
-        real_import = builtins.__import__
+    def test_returns_cpu_when_subprocess_fails(self, monkeypatch):
+        import subprocess
 
-        def mock_import(name, *args, **kwargs):
-            if name == "torch":
-                raise ImportError("no torch")
-            if name == "subprocess":
-                raise ImportError("no subprocess")
-            return real_import(name, *args, **kwargs)
+        def always_fail(*args, **kwargs):
+            raise Exception("simulated GPU probe failure")
 
-        monkeypatch.setattr(builtins, "__import__", mock_import)
+        monkeypatch.setattr(subprocess, "check_output", always_fail)
         from src.models.training_pipeline import _detect_lgbm_device
         result = _detect_lgbm_device()
-        assert result in ("cpu", "gpu")  # either is valid; just no exception
+        assert result == ("cpu", 0, 0)
 
-    def test_returns_string_type(self):
+    def test_returns_tuple_type(self):
         from src.models.training_pipeline import _detect_lgbm_device
         result = _detect_lgbm_device()
-        assert isinstance(result, str)
-        assert result in ("cpu", "gpu")
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        device_type, platform_id, device_id = result
+        assert device_type in ("cpu", "gpu")
+        assert isinstance(platform_id, int)
+        assert isinstance(device_id, int)
 
     def test_no_hardcoded_device_strings_in_training_layer(self):
         root = Path(__file__).parent.parent

@@ -213,6 +213,7 @@ changes (adapter swap only).  All credentials from `.env`/config; nothing hard-c
 - [x] **RELIANCE security_id = 2885** (equity); near-month FUTSTK sec_id = 62802 (Jun 30 expiry)
 - [x] Preflight check passed on dev laptop: 117 GB free, all env vars present, DB path writable
 - [x] Full test suite: **514 / 514 passing** after all real-API fixes
+  _(As of 2026-07-10: 509/514 — 5 tests broken by 3060 changes, fixed in consolidation pass; see CHANGELOG)_
 
 ## Phase 2 — Intelligence (CPU)
 Phase 2 plan posted 2026-06-26; seed weights added 2026-06-27.
@@ -387,7 +388,7 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
       GPU detection: cpu fallback, string type, no hard-coded 'cuda' in models layer;
       RUNBOOK: file exists, mentions 5 steps, git-ignored env, mentions _parse_ohlcv_response
 
-**Total: 514 / 514 tests passing**
+**Total: 509 / 514 tests passing** _(5 broken by 3060 changes; fixed in 2026-07-10 consolidation pass — see CHANGELOG)_
 
 ### Checkpoint 2.5 — Final Test Evaluation
 - [x] Final test set evaluated ONCE (111 stocks → 330k rows → ~31k sealed test rows)

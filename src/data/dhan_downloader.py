@@ -50,6 +50,7 @@ import io
 import json
 import logging
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -278,6 +279,11 @@ class DhanBulkDownloader:
             db_path,
             _mock_master=_mock_instrument_master,
         )
+        # Global rate-limiter: serialises real API calls across all threads so
+        # request_delay_seconds is enforced between consecutive requests, not
+        # just per-worker (which allows all 15 workers to burst simultaneously).
+        self._api_throttle_lock = threading.Lock()
+        self._api_last_call_at: float = 0.0
         self._ensure_schema()
 
     # ── Public API ────────────────────────────────────────────────────────────
@@ -313,8 +319,6 @@ class DhanBulkDownloader:
         def _worker(args):
             sym, tf, start, end = args
             self._process_job(sym, tf, start, end)
-            if self._request_delay > 0 and self._mock_fetch is None:
-                time.sleep(self._request_delay)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             list(executor.map(_worker, all_pending_jobs))
@@ -348,8 +352,6 @@ class DhanBulkDownloader:
         def _worker(args):
             sym, start, end = args
             self._process_fo_job(sym, start, end)
-            if self._request_delay > 0 and self._mock_fetch is None:
-                time.sleep(self._request_delay)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
             list(executor.map(_worker, all_pending_jobs))
@@ -709,6 +711,7 @@ class DhanBulkDownloader:
             headers=self._get_headers(),
             method="POST",
         )
+        self._throttle()
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
 
@@ -896,6 +899,7 @@ class DhanBulkDownloader:
             headers=self._get_headers(),
             method="POST",
         )
+        self._throttle()
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
 
@@ -1045,6 +1049,21 @@ class DhanBulkDownloader:
         return result
 
     # ── Internal: HTTP helpers ────────────────────────────────────────────────
+
+    def _throttle(self) -> None:
+        """Enforce request_delay_seconds globally across all worker threads.
+
+        Acquires a lock so only one thread issues an API call at a time, and
+        sleeps for the remainder of request_delay_seconds since the last call.
+        This prevents the 15-worker ThreadPoolExecutor from bursting all 15
+        requests simultaneously before any per-worker sleep fires.
+        """
+        with self._api_throttle_lock:
+            now = time.monotonic()
+            gap = self._request_delay - (now - self._api_last_call_at)
+            if gap > 0:
+                time.sleep(gap)
+            self._api_last_call_at = time.monotonic()
 
     def _get_headers(self) -> dict:
         import random

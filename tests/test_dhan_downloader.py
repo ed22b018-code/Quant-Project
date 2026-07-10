@@ -174,7 +174,7 @@ def test_run_stores_rows_in_ohlcv_intraday(db):
     dl.run(["RELIANCE"], ["1"], date(2024, 1, 1), date(2024, 1, 31))
 
     with DuckDBClient(db) as conn:
-        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE'")
+        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE' AND timeframe='1'")
     assert df["n"].iloc[0] == 5
 
 
@@ -190,7 +190,7 @@ def test_run_idempotent_no_duplicate_rows(db):
     dl.run(["RELIANCE"], ["1"], date(2024, 1, 1), date(2024, 1, 31))
 
     with DuckDBClient(db) as conn:
-        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE'")
+        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE' AND timeframe='1'")
     assert df["n"].iloc[0] == 5  # same 5 rows, not 10
 
 
@@ -244,9 +244,9 @@ def test_resume_after_interruption(db):
         actual_start = actual_start.date()
     assert actual_start == chunks[2][0]  # correct chunk_start
 
-    # Total rows = 5 (pre-seeded) + 3 (from fetch) = 8
+    # Total rows = 5 (pre-seeded) + 3 (from fetch) = 8 (timeframe='1' only)
     with DuckDBClient(db) as conn:
-        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE'")
+        df = conn.query_df("SELECT COUNT(*) AS n FROM ohlcv_intraday WHERE symbol='RELIANCE' AND timeframe='1'")
     assert df["n"].iloc[0] == 8
 
 

@@ -16,6 +16,36 @@
   - **Returns**: +0.33% model net return vs -1.05% random dart return (inclusive of 0.1% strict trading cost slippage + brokerage).
   - **Verdict**: A small but definitive statistical edge is present using only price/volume indicators.
 
+### Note on news sentiment (important for future runs)
+
+`news_sentiment` and `src/features/sentiment.py` are **intact in the codebase**. The 3060
+training run passed a **restricted `gates_open` set** to `run_training()` that excluded
+`DataGate.NEWS_NLP` — because no historical news data exists for the 2019–2026 backtest window.
+Sentiment was **not removed from the code**; it was **excluded from this specific run's
+feature set via the gate mechanism**. The feature will be active in live operation once the
+news ingestion pipeline is populated.
+
+### Consolidation fixes (2026-07-10 — dev laptop)
+
+Five tests broken by the 3060 commit were fixed:
+
+| Test | Root cause | Fix |
+|---|---|---|
+| `test_run_stores_rows_in_ohlcv_intraday` | `_derive_and_upsert_timeframes` adds 5/15/25/60-min derived rows; COUNT(*) without timeframe filter saw all rows | Added `AND timeframe='1'` to the COUNT query |
+| `test_run_idempotent_no_duplicate_rows` | Same cause | Same fix |
+| `test_resume_after_interruption` | Same cause | Same fix |
+| `test_returns_string_type` | `_detect_lgbm_device()` now returns `tuple[str, int, int]`, not `str` | Updated assertion to expect tuple with 3 typed elements |
+| `test_returns_cpu_when_torch_unavailable` | New function uses `subprocess.check_output` directly (not torch); builtins monkeypatch didn't intercept already-imported subprocess | Replaced with `monkeypatch.setattr(subprocess, "check_output", ...)` |
+
+Additional code fixes in this pass:
+- **SQL injection** (`training_pipeline.py:74`): replaced f-string `WHERE symbol = '{sym_name}'` with parameterized `WHERE symbol = ?`
+- **Rate-limit burst** (`dhan_downloader.py`): added `_throttle()` with a global `threading.Lock` — all real API calls now serialize through a single lock with `request_delay_seconds` enforced globally, not per-worker. Prevents 15 workers from bursting simultaneously.
+- **`update_config.py` deleted**: Python `''FUTSTK''` quoting bug made it unrunnable; was dead code anyway (111-symbol list was assembled manually via `filter_symbols.py`).
+- **Root-level scripts moved** to `tools/` with README.
+- **Provenance note** in `_provenance()` updated to not falsely claim "Trained on Price/Volume + Sentiment" regardless of which gates are actually open.
+
+**Test count after consolidation: 514 / 514 passing**
+
 ---
 
 ## Checkpoint 1.6.5 — First Real Dhan API Contact (2026-06-29) ✅

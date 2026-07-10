@@ -72,7 +72,8 @@ def _build_for_symbol_worker(sym_name: str, db_path: str, timestamps: list, buil
     import duckdb
     with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         df_intra = con.execute(
-            f"SELECT ts, close FROM ohlcv_intraday WHERE symbol = '{sym_name}' ORDER BY ts"
+            "SELECT ts, close FROM ohlcv_intraday WHERE symbol = ? ORDER BY ts",
+            [sym_name]
         ).df()
         
     labels_df = None
@@ -309,7 +310,7 @@ def _provenance(
         "feature_names": feature_names,
         "n_timestamps_per_symbol": n_timestamps,
         "dry_run": dry_run,
-        "notes": "F&O/OI features are explicitly absent in this version. Trained on Price/Volume + Sentiment (equity data) only.",
+        "notes": "F&O/OI features explicitly absent (Dhan /charts/historical returns no OI data). Active features depend on gates_open parameter — check feature_names field.",
         **extra,
     }
 
