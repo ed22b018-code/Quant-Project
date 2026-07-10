@@ -47,7 +47,7 @@ UTC = timezone.utc
 
 def _daily(db_path: str, symbol: str, as_of: datetime, cols: str, limit: int) -> list:
     """Fetch daily OHLCV rows strictly before as_of.date(), newest first."""
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         return con.execute(
             f"SELECT {cols} FROM ohlcv_daily "
             "WHERE symbol = ? AND date < CAST(? AS DATE) "
@@ -63,7 +63,7 @@ def _intraday_today(db_path: str, symbol: str, as_of: datetime, cols: str) -> li
     run 03:45–10:00 UTC (09:15–15:30 IST), always within the same UTC date.
     """
     as_of_utc = as_of if as_of.tzinfo else as_of.replace(tzinfo=UTC)
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         return con.execute(
             f"SELECT {cols} FROM ohlcv_intraday "
             "WHERE symbol = ? AND timeframe = '1' "
@@ -196,7 +196,7 @@ def opening_range_position(symbol: str, as_of: datetime, db_path: str) -> float 
     if as_of_utc < or_end:
         return None
 
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         or_rows = con.execute(
             "SELECT MAX(high), MIN(low) FROM ohlcv_intraday "
             "WHERE symbol = ? AND timeframe = '1' AND ts >= ? AND ts < ?",

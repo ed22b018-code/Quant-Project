@@ -152,6 +152,7 @@ class Orchestrator:
         end_date: date,
         timeframes: list[str] | None = None,
         skip_fo: bool = False,
+        skip_news: bool = False,
         _mock_preflight_fn: Optional[Callable] = None,
         _mock_test_fetch_fn: Optional[Callable] = None,
         _mock_downloader: Any = None,
@@ -162,8 +163,9 @@ class Orchestrator:
         self.universe = universe
         self.start_date = start_date
         self.end_date = end_date
-        self.timeframes = timeframes or ["1", "5", "15", "25", "60"]
+        self.timeframes = timeframes or ["1"]
         self.skip_fo = skip_fo
+        self.skip_news = skip_news
 
         self._mock_preflight_fn = _mock_preflight_fn
         self._mock_test_fetch_fn = _mock_test_fetch_fn
@@ -363,13 +365,28 @@ class Orchestrator:
             return
         from src.models.training_pipeline import run_training  # noqa: PLC0415
         from src.features import DataGate  # noqa: PLC0415
+        from src.config import load_config
+        
+        config = load_config()
+        
+        gates_open = set(DataGate)
+        if self.skip_fo and DataGate.FO in gates_open:
+            gates_open.remove(DataGate.FO)
+        if getattr(self, "skip_news", False):
+            if DataGate.NEWS in gates_open:
+                gates_open.remove(DataGate.NEWS)
+            if DataGate.NEWS_NLP in gates_open:
+                gates_open.remove(DataGate.NEWS_NLP)
+        
         run_training(
             db_path=self.db_path,
             output_dir=str(self.output_dir),
             universe=self.universe,
             start_date=self.start_date,
             end_date=self.end_date,
+            max_cpu_cores=config.model.max_cpu_cores,
             dry_run=dry_run,
+            gates_open=gates_open,
         )
 
     def _stage_calibrate(self, *, dry_run: bool) -> None:

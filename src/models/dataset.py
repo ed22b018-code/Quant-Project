@@ -166,14 +166,24 @@ class DatasetBuilder:
 
         Each feature is computed at its t0 — no future data included.
         """
+        import logging
+        _BUILD_LOG = logging.getLogger(__name__)
+
         rows = []
-        for t0 in timestamps:
+        n_ts = len(timestamps)
+        for i, t0 in enumerate(timestamps):
+            if i > 0 and i % max(1, n_ts // 10) == 0:
+                pct = (i / n_ts) * 100
+                _BUILD_LOG.info(f"[{symbol}] Building PIT features... {i}/{n_ts} timestamps ({pct:.1f}%)")
+            
             feat = FeatureRegistry.compute_all(
                 symbol, t0, db_path, gates_open=self.gates_open
             )
             if self.feature_names is not None:
                 feat = {k: v for k, v in feat.items() if k in self.feature_names}
             rows.append({"symbol": symbol, "t0": t0, **feat})
+            
+        _BUILD_LOG.info(f"[{symbol}] Completed building {n_ts} timestamps.")
 
         df = pd.DataFrame(rows)
 

@@ -47,26 +47,39 @@ _LOG = logging.getLogger(__name__)
 UTC = timezone.utc
 
 
-def _detect_lgbm_device() -> str:
-    """Detect the best device for LightGBM: 'gpu' or 'cpu'.
-
-    Tries torch.cuda first (RTX 3060 has CUDA); falls back to nvidia-smi;
-    returns 'cpu' if neither is available.
+def _detect_lgbm_device() -> tuple[str, int, int]:
+    """Detect the best device for LightGBM.
+    Returns (device_type, platform_id, device_id).
+    
+    Probes OpenCL platforms to reliably find the NVIDIA GPU, avoiding AMD iGPU.
     """
-    try:
-        import torch  # noqa: PLC0415
-        return "gpu" if torch.cuda.is_available() else "cpu"
-    except ImportError:
-        pass
-    try:
-        import subprocess  # noqa: PLC0415
-        r = subprocess.run(
-            ["nvidia-smi", "-L"], capture_output=True, timeout=5
-        )
-        return "gpu" if r.returncode == 0 else "cpu"
-    except Exception:
-        pass
-    return "cpu"
+    import subprocess
+    import sys
+    
+    # Try to probe OpenCL platforms for NVIDIA
+    for i in range(3):
+        script = f"import lightgbm as lgb, numpy as np; lgb.train({{'device_type':'gpu', 'gpu_platform_id':{i}, 'gpu_device_id':0, 'verbose':1}}, lgb.Dataset(np.random.rand(10,2), label=np.random.rand(10)), num_boost_round=1)"
+        try:
+            out = subprocess.check_output([sys.executable, "-c", script], stderr=subprocess.STDOUT, text=True)
+            if "NVIDIA" in out:
+                return "gpu", i, 0
+        except Exception:
+            pass
+            
+    return "cpu", 0, 0
+
+def _build_for_symbol_worker(sym_name: str, db_path: str, timestamps: list, builder, labeler) -> pd.DataFrame:
+    import duckdb
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
+        df_intra = con.execute(
+            f"SELECT ts, close FROM ohlcv_intraday WHERE symbol = '{sym_name}' ORDER BY ts"
+        ).df()
+        
+    labels_df = None
+    if not df_intra.empty:
+        labels_df = labeler.label_series(df_intra["close"], df_intra["ts"])
+        
+    return builder.build(sym_name, timestamps, db_path, labels_df=labels_df)
 
 _GATE_NONE_FEATURES = [
     "return_1d", "return_5d", "vol_20d", "volume_ratio_20d", "atr_20d",
@@ -94,6 +107,7 @@ def run_training(
     n_walk_forward_splits: int = 5,
     gates_open: Optional[set] = None,
     horizon_minutes: int = 30,
+    max_cpu_cores: int = -1,
     dry_run: bool = False,
 ) -> dict:
     """Run the complete training pipeline.
@@ -155,10 +169,30 @@ def run_training(
         n_splits=n_walk_forward_splits, final_test_fraction=0.10
     )
 
+    import multiprocessing
+    import concurrent.futures
+    
+    total_cores = multiprocessing.cpu_count()
+    use_cores = max_cpu_cores if max_cpu_cores > 0 else max(1, total_cores - 2)
+    use_cores = min(use_cores, total_cores)
+    
     parts: list[pd.DataFrame] = []
-    for sym in universe:
-        sym_df = builder.build(sym, timestamps, db_path)
-        parts.append(sym_df)
+    _LOG.info("Building dataset and labels for %d symbols concurrently using %d threads...", len(universe), use_cores)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=use_cores) as executor:
+        future_to_sym = {
+            executor.submit(_build_for_symbol_worker, sym, db_path, timestamps, builder, labeler): sym 
+            for sym in universe
+        }
+        for future in concurrent.futures.as_completed(future_to_sym):
+            sym = future_to_sym[future]
+            try:
+                sym_df = future.result()
+                parts.append(sym_df)
+                _LOG.info("Finished dataset build for %s", sym)
+            except Exception as exc:
+                _LOG.error("Symbol %s generated an exception: %s", sym, exc)
+                raise
 
     dataset = pd.concat(parts, ignore_index=True).sort_values("t0").reset_index(drop=True)
     _LOG.info("Dataset: %d rows, %d columns", len(dataset), len(dataset.columns))
@@ -184,8 +218,22 @@ def run_training(
 
     # ── 4. Train models on last fold ──────────────────────────────────────────
     feature_cols = [c for c in dataset.columns if c in feature_names]
-    cone = QuantileConeTrainer(horizon_minutes=horizon_minutes, feature_names=feature_cols)
-    classifier = ScenarioClassifier(feature_names=feature_cols)
+
+    device, plat_id, dev_id = _detect_lgbm_device()
+    
+    if device == "gpu":
+        lgbm_params = {"device_type": "gpu", "gpu_platform_id": plat_id, "gpu_device_id": dev_id, "num_threads": use_cores}
+        device_msg = f"GPU (NVIDIA OpenCL Platform {plat_id}, Device {dev_id})"
+    else:
+        lgbm_params = {"num_threads": use_cores}
+        device_msg = "CPU"
+        
+    _LOG.info("LightGBM device selected: %s (Max CPU Cores: %d / %d)", device_msg, use_cores, total_cores)
+    print(f"\n[DEVICE CONFIG] Training will use the {device_msg}")
+    print(f"[DEVICE CONFIG] CPU Threads Cap: {use_cores} (Total system threads: {total_cores})\n")
+
+    cone = QuantileConeTrainer(horizon_minutes=horizon_minutes, feature_names=feature_cols, lgbm_params=lgbm_params)
+    classifier = ScenarioClassifier(feature_names=feature_cols, lgbm_params=lgbm_params)
     calibrator = ModelCalibrator(method="isotonic")
 
     if feature_cols and "label" in dataset.columns and purged_pairs:
@@ -261,6 +309,7 @@ def _provenance(
         "feature_names": feature_names,
         "n_timestamps_per_symbol": n_timestamps,
         "dry_run": dry_run,
+        "notes": "F&O/OI features are explicitly absent in this version. Trained on Price/Volume + Sentiment (equity data) only.",
         **extra,
     }
 

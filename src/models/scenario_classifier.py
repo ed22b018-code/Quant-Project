@@ -89,7 +89,6 @@ class ScenarioClassifier:
             "objective": "multiclass",
             "num_class": 3,
             "verbose": -1,
-            "n_jobs": -1,
             **user_params,
         }
         dtrain = lgb.Dataset(X_arr, label=y_idx)

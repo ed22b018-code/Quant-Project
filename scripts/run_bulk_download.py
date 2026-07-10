@@ -29,10 +29,13 @@ _DEFAULT_SYMBOLS = [
     "SBIN", "WIPRO", "AXISBANK", "LT", "HINDUNILVR",
 ]
 
-_DEFAULT_TIMEFRAMES = ["1", "5", "15", "25", "60"]
+_DEFAULT_TIMEFRAMES = ["1"]
 
 
 def main(argv: list[str] | None = None) -> int:
+    from src.config import load_config
+    config = load_config()
+    
     parser = argparse.ArgumentParser(
         description="Dhan bulk download — intraday OHLCV + F&O history."
     )
@@ -41,8 +44,8 @@ def main(argv: list[str] | None = None) -> int:
         help="DuckDB path (default: data/market.duckdb)",
     )
     parser.add_argument(
-        "--symbols", nargs="+", default=_DEFAULT_SYMBOLS,
-        help="NSE tickers to download (space-separated)",
+        "--symbols", nargs="+", default=config.universe.symbols,
+        help="NSE tickers to download (space-separated, defaults to all from config.toml)",
     )
     parser.add_argument(
         "--timeframes", nargs="+", default=_DEFAULT_TIMEFRAMES,
@@ -50,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--start", default=None,
-        help="Start date YYYY-MM-DD (default: 5 years ago)",
+        help="Start date YYYY-MM-DD (default: 3 years ago)",
     )
     parser.add_argument(
         "--end", default=None,
@@ -83,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
     start_date = (
         date.fromisoformat(args.start)
         if args.start
-        else end_date - timedelta(days=365 * 5)
+        else end_date - timedelta(days=365 * 3)
     )
 
     from src.data.dhan_downloader import DhanBulkDownloader  # noqa: PLC0415

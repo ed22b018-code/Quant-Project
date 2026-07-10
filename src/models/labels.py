@@ -100,30 +100,32 @@ class TripleBarrierLabeler:
         """
         prices = prices.reset_index(drop=True)
         timestamps = timestamps.reset_index(drop=True)
-        n = len(prices)
+        prices_arr = prices.to_numpy(dtype=float)
+        timestamps_arr = timestamps.to_numpy()
+        n = len(prices_arr)
 
         records = []
         for i in range(n):
-            p0 = float(prices.iloc[i])
-            t0 = timestamps.iloc[i]
+            p0 = prices_arr[i]
+            t0 = timestamps_arr[i]
             upper = p0 * (1.0 + self.profit_pct)
             lower = p0 * (1.0 - self.stop_pct)
 
             end_idx = min(i + self.horizon_bars, n - 1)
             label: Label = Label.NO_TRADE
-            t1 = timestamps.iloc[end_idx]
+            t1 = timestamps_arr[end_idx]
             barrier = "time"
 
             for j in range(i + 1, end_idx + 1):
-                p_j = float(prices.iloc[j])
+                p_j = prices_arr[j]
                 if p_j >= upper:
                     label = Label.BULLISH
-                    t1 = timestamps.iloc[j]
+                    t1 = timestamps_arr[j]
                     barrier = "profit"
                     break
                 if p_j <= lower:
                     label = Label.BEARISH
-                    t1 = timestamps.iloc[j]
+                    t1 = timestamps_arr[j]
                     barrier = "stop"
                     break
 

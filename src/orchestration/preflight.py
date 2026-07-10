@@ -33,7 +33,7 @@ from typing import Callable, Optional
 
 _LOG = logging.getLogger(__name__)
 
-MIN_FREE_GB: float = 25.0  # conservative estimate for ~5yr NSE intraday data
+MIN_FREE_GB: float = 8.0  # conservative estimate for ~3yr NSE intraday data
 
 
 class PreflightError(RuntimeError):
@@ -146,7 +146,7 @@ def run_preflight(
             detail=(
                 f"{free_gb:.1f} GB free (need {min_free_gb:.0f} GB)"
                 if disk_ok
-                else f"Only {free_gb:.1f} GB free — need {min_free_gb:.0f} GB for 5yr data"
+                else f"Only {free_gb:.1f} GB free — need {min_free_gb:.0f} GB for 3yr data"
             ),
         ))
     except Exception as exc:

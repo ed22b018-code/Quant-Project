@@ -40,10 +40,9 @@ except ImportError:
     pass
 
 
-_DEFAULT_SYMBOLS = [
-    "RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK",
-    "SBIN", "WIPRO", "AXISBANK", "LT", "HINDUNILVR",
-]
+from src.config import load_config
+_config = load_config()
+_DEFAULT_SYMBOLS = _config.universe.symbols
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -66,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--start", default=None,
-        help="Start date YYYY-MM-DD (default: 5 years ago)",
+        help="Start date YYYY-MM-DD (default: 3 years ago)",
     )
     parser.add_argument(
         "--end", default=None,
@@ -100,6 +99,10 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--skip-news", action="store_true",
+        help="Skip News features. Will prevent the dataset builder from removing all rows due to NaNs.",
+    )
+    parser.add_argument(
         "--verbose", action="store_true",
         help="Enable debug logging",
     )
@@ -114,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
     start_date = (
         date.fromisoformat(args.start)
         if args.start
-        else end_date - timedelta(days=365 * 5)
+        else end_date - timedelta(days=365 * 3)
     )
 
     from src.orchestration.orchestrator import Orchestrator, Stage  # noqa: PLC0415
@@ -135,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         start_date=start_date,
         end_date=end_date,
         skip_fo=args.skip_fo,
+        skip_news=args.skip_news,
     )
 
     try:

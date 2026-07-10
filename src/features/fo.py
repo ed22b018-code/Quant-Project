@@ -32,7 +32,7 @@ from src.features.base import DataGate, FeatureRegistry
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _fetch_fo(db_path: str, symbol: str, as_of: datetime, cols: str) -> list:
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         return con.execute(
             f"SELECT {cols} FROM fo_daily_metrics "
             "WHERE symbol = ? AND date < CAST(? AS DATE) "
@@ -42,7 +42,7 @@ def _fetch_fo(db_path: str, symbol: str, as_of: datetime, cols: str) -> list:
 
 
 def _fetch_spot(db_path: str, symbol: str, as_of: datetime) -> float | None:
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         rows = con.execute(
             "SELECT close FROM ohlcv_daily "
             "WHERE symbol = ? AND date < CAST(? AS DATE) "

@@ -84,6 +84,7 @@ class TradingConfig(BaseModel):
 class ModelConfig(BaseModel):
     random_seed: int
     quantile_levels: list[float]
+    max_cpu_cores: int = -1
 
     @field_validator("quantile_levels")
     @classmethod

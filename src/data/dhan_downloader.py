@@ -109,55 +109,40 @@ class DhanInstrumentMaster:
 
         _log.info("DhanInstrumentMaster: downloading from %s", url)
         try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                content = resp.read().decode("utf-8-sig")
+            df = pd.read_csv(url, sep=",", low_memory=False)
+            # Filter valid NSE instruments
+            df = df[df["SEM_SMST_SECURITY_ID"].notna()].copy()
+            df = df[df["SEM_TRADING_SYMBOL"].notna()].copy()
+            df = df[df["SEM_EXM_EXCH_ID"].notna() & df["SEM_EXM_EXCH_ID"].astype(str).str.startswith("NSE")].copy()
+            
+            # Map columns
+            df_insert = pd.DataFrame()
+            df_insert["security_id"] = df["SEM_SMST_SECURITY_ID"].astype(str).str.strip()
+            df_insert["symbol"] = df["SEM_TRADING_SYMBOL"].astype(str).str.strip()
+            df_insert["exchange"] = df["SEM_EXM_EXCH_ID"].astype(str).str.strip()
+            df_insert["instrument_type"] = df["SEM_INSTRUMENT_NAME"].astype(str).str.strip()
+            df_insert["lot_size"] = pd.to_numeric(df["SEM_LOT_UNITS"], errors="coerce").fillna(0).astype(int)
+            df_insert["tick_size"] = pd.to_numeric(df["SEM_TICK_SIZE"], errors="coerce").fillna(0.0)
+            df_insert["expiry_date"] = pd.to_datetime(df.get("SEM_EXPIRY_DATE"), errors="coerce").dt.date
+            df_insert["strike_price"] = pd.to_numeric(df["SEM_STRIKE_PRICE"], errors="coerce").fillna(0.0)
+            df_insert["ingested_at"] = datetime.now(timezone.utc)
+            
+            # Populate cache
+            for row in df_insert.itertuples():
+                self._cache[(row.symbol, row.instrument_type)] = row.security_id
+                
+            rows_loaded = len(df_insert)
+            with DuckDBClient(self._db_path) as db:
+                db.conn.execute("""
+                    INSERT INTO dhan_instruments
+                    SELECT security_id, symbol, exchange, instrument_type, lot_size, tick_size, expiry_date, strike_price, ingested_at
+                    FROM df_insert
+                    ON CONFLICT (security_id, exchange, instrument_type) DO NOTHING
+                """)
+            return rows_loaded
         except Exception as exc:
             _log.error("DhanInstrumentMaster: download failed: %s", exc)
             return 0
-
-        rows_loaded = 0
-        now = datetime.now(timezone.utc)
-        with DuckDBClient(self._db_path) as db:
-            reader = csv.DictReader(io.StringIO(content))
-            for row in reader:
-                sec_id = str(row.get("SEM_SMST_SECURITY_ID", "")).strip()
-                symbol = str(row.get("SEM_TRADING_SYMBOL", "")).strip()
-                exchange = str(row.get("SEM_EXM_EXCH_ID", "")).strip()
-                inst_type = str(row.get("SEM_INSTRUMENT_NAME", "")).strip()
-                if not sec_id or not symbol:
-                    continue
-                # Always update in-memory cache — DB insert is persistence only.
-                # On :memory: DBs the insert will fail (schema lives in a different
-                # connection), so the cache must be populated unconditionally.
-                self._cache[(symbol, inst_type)] = sec_id
-                try:
-                    db.execute(
-                        """
-                        INSERT INTO dhan_instruments
-                          (security_id, symbol, exchange, instrument_type,
-                           lot_size, tick_size, expiry_date, strike_price, ingested_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ON CONFLICT (security_id) DO NOTHING
-                        """,
-                        (
-                            sec_id, symbol, exchange, inst_type,
-                            _safe_int(row.get("SEM_LOT_UNITS")),
-                            _safe_float(row.get("SEM_TICK_SIZE")),
-                            _safe_date(row.get("SM_EXPIRY_DATE")),
-                            _safe_float(row.get("SEM_STRIKE_PRICE")),
-                            now,
-                        ),
-                    )
-                    rows_loaded += 1
-                except Exception as exc:  # noqa: BLE001
-                    _log.debug("DhanInstrumentMaster: skipping row %r: %s", sec_id, exc)
-
-        _log.info("DhanInstrumentMaster: loaded %d instruments", rows_loaded)
-        return rows_loaded
 
     def get_security_id(self, symbol: str, instrument_type: str = "EQUITY") -> str:
         """Return Dhan security_id for (symbol, instrument_type).
@@ -180,13 +165,14 @@ class DhanInstrumentMaster:
             with DuckDBClient(self._db_path) as db:
                 result = db.query_df(
                     "SELECT security_id FROM dhan_instruments "
-                    "WHERE symbol = ? AND instrument_type = ? LIMIT 1",
+                    "WHERE symbol = ? AND instrument_type = ? "
+                    "AND exchange LIKE 'NSE%'",
                     (symbol, instrument_type),
                 )
-            if not result.empty:
-                sec_id = str(result.iloc[0]["security_id"])
-                self._cache[key] = sec_id
-                return sec_id
+                if not result.empty:
+                    sec_id = str(result.iloc[0]["security_id"])
+                    self._cache[key] = sec_id
+                    return sec_id
         except Exception as exc:  # noqa: BLE001
             _log.error("DhanInstrumentMaster: DB lookup failed for %r: %s", symbol, exc)
 
@@ -272,7 +258,16 @@ class DhanBulkDownloader:
     ) -> None:
         self._db_path = str(db_path)
         self._client_id = client_id or os.environ.get("DHAN_CLIENT_ID", "")
-        self._access_token = access_token or os.environ.get("DHAN_ACCESS_TOKEN", "")
+        
+        self._access_tokens = []
+        if access_token:
+            self._access_tokens.append(access_token)
+        for k, v in os.environ.items():
+            if k.startswith("DHAN_ACCESS_TOKEN") and v and v not in self._access_tokens:
+                self._access_tokens.append(v)
+        if not self._access_tokens:
+            self._access_tokens.append("")
+
         self._base_url = base_url.rstrip("/")
         self._request_delay = request_delay_seconds
         self._max_retries = max_retries
@@ -298,6 +293,8 @@ class DhanBulkDownloader:
 
         Resumable: pre-existing DONE chunks are skipped; pending/failed are retried.
         """
+        import concurrent.futures
+        
         chunks = self._build_chunks(start_date, end_date)
         total_jobs = len(symbols) * len(timeframes) * len(chunks)
         _log.info(
@@ -305,18 +302,22 @@ class DhanBulkDownloader:
             len(symbols), len(timeframes), len(chunks), total_jobs,
         )
 
+        all_pending_jobs = []
         for symbol in symbols:
             for tf in timeframes:
                 self._ensure_jobs(symbol, tf, chunks)
                 pending = self._load_pending_jobs(symbol=symbol, timeframe=tf)
                 for job in pending:
-                    self._process_job(symbol, tf, job["chunk_start"], job["chunk_end"])
-                    if self._request_delay > 0 and self._mock_fetch is None:
-                        time.sleep(self._request_delay)
-                    elif self._request_delay > 0 and self._mock_fetch is not None:
-                        # In tests, still record the sleep attempt via mock tracking
-                        # but don't actually sleep.
-                        pass
+                    all_pending_jobs.append((symbol, tf, job["chunk_start"], job["chunk_end"]))
+
+        def _worker(args):
+            sym, tf, start, end = args
+            self._process_job(sym, tf, start, end)
+            if self._request_delay > 0 and self._mock_fetch is None:
+                time.sleep(self._request_delay)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            list(executor.map(_worker, all_pending_jobs))
 
     def run_fo(
         self,
@@ -329,18 +330,29 @@ class DhanBulkDownloader:
         Stores raw strike-level data in fo_history table.
         Call compute_fo_metrics() afterward to populate fo_daily_metrics.
         """
+        import concurrent.futures
+        
         chunks = self._build_chunks(start_date, end_date)
         _log.info(
             "DhanBulkDownloader.run_fo: %d symbols × %d chunks = %d jobs",
             len(symbols), len(chunks), len(symbols) * len(chunks),
         )
+        
+        all_pending_jobs = []
         for symbol in symbols:
             self._ensure_jobs(symbol, _FO_TIMEFRAME, chunks)
             pending = self._load_pending_jobs(symbol=symbol, timeframe=_FO_TIMEFRAME)
             for job in pending:
-                self._process_fo_job(symbol, job["chunk_start"], job["chunk_end"])
-                if self._request_delay > 0 and self._mock_fetch is None:
-                    time.sleep(self._request_delay)
+                all_pending_jobs.append((symbol, job["chunk_start"], job["chunk_end"]))
+
+        def _worker(args):
+            sym, start, end = args
+            self._process_fo_job(sym, start, end)
+            if self._request_delay > 0 and self._mock_fetch is None:
+                time.sleep(self._request_delay)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            list(executor.map(_worker, all_pending_jobs))
 
     def compute_fo_metrics(self, symbols: list[str]) -> int:
         """Aggregate fo_history → fo_daily_metrics for given symbols.
@@ -607,6 +619,10 @@ class DhanBulkDownloader:
             return
 
         rows = self._upsert_intraday(df, symbol, timeframe)
+        
+        if timeframe == "1" and not df.empty:
+            self._derive_and_upsert_timeframes(df, symbol)
+            
         self._mark_job(symbol, timeframe, chunk_start, "done", rows=rows)
 
     def _download_chunk(
@@ -732,29 +748,68 @@ class DhanBulkDownloader:
         self, df: pd.DataFrame, symbol: str, timeframe: str
     ) -> int:
         """Upsert rows into ohlcv_intraday.  Returns number of rows inserted."""
+        if df.empty: return 0
         now = datetime.now(timezone.utc)
+        insert_df = df.copy()
+        if "ts" not in insert_df.columns:
+            insert_df = insert_df.reset_index()
+        insert_df["symbol"] = symbol
+        insert_df["timeframe"] = timeframe
+        insert_df["source"] = "dhan_historical"
+        insert_df["ingested_at"] = now
+        
         rows_inserted = 0
         with DuckDBClient(self._db_path) as db:
-            for _, row in df.iterrows():
-                try:
-                    db.execute(
-                        """
-                        INSERT INTO ohlcv_intraday
-                          (symbol, timeframe, ts, open, high, low, close, volume,
-                           source, ingested_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'dhan_historical', ?)
-                        ON CONFLICT (symbol, timeframe, ts) DO NOTHING
-                        """,
-                        (
-                            symbol, timeframe, row["ts"],
-                            row["open"], row["high"], row["low"], row["close"],
-                            int(row["volume"]), now,
-                        ),
-                    )
-                    rows_inserted += 1
-                except Exception as exc:  # noqa: BLE001
-                    _log.debug("upsert_intraday: skipped row for %s/%s: %s", symbol, timeframe, exc)
+            try:
+                db.conn.register("temp_intraday_df", insert_df)
+                db.conn.execute(
+                    """
+                    INSERT INTO ohlcv_intraday
+                      (symbol, timeframe, ts, open, high, low, close, volume, source, ingested_at)
+                    SELECT symbol, timeframe, CAST(ts AS TIMESTAMP), CAST(open AS DOUBLE), CAST(high AS DOUBLE), CAST(low AS DOUBLE), CAST(close AS DOUBLE), CAST(volume AS INTEGER), source, CAST(ingested_at AS TIMESTAMP)
+                    FROM temp_intraday_df
+                    ON CONFLICT (symbol, timeframe, ts) DO NOTHING
+                    """
+                )
+                db.conn.unregister("temp_intraday_df")
+                rows_inserted = len(insert_df)
+            except Exception as exc:
+                _log.error("upsert_intraday: dataframe insert failed: %s", exc)
         return rows_inserted
+
+    def _derive_and_upsert_timeframes(self, df_1m: pd.DataFrame, symbol: str) -> None:
+        """Derive 5, 15, 25, 60 minute timeframes from 1-minute data and upsert."""
+        if df_1m.empty:
+            return
+            
+        # Ensure index is datetime for resampling
+        df = df_1m.set_index('ts')
+        
+        agg_dict = {
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        }
+        
+        derived_timeframes = {
+            "5": "5min",
+            "15": "15min",
+            "25": "25min",
+            "60": "60min"
+        }
+        
+        for tf_str, freq in derived_timeframes.items():
+            try:
+                resampled = df.resample(freq).agg(agg_dict).dropna()
+                if not resampled.empty:
+                    # Reset index to bring 'ts' back as a column
+                    resampled_df = resampled.reset_index()
+                    self._upsert_intraday(resampled_df, symbol, tf_str)
+                    
+            except Exception as exc:
+                _log.error("Failed to derive %s timeframe for %s: %s", tf_str, symbol, exc)
 
     # ── Internal: F&O download ────────────────────────────────────────────────
 
@@ -912,33 +967,34 @@ class DhanBulkDownloader:
         return pd.DataFrame(rows)
 
     def _upsert_fo_history(self, df: pd.DataFrame, symbol: str) -> int:
+        if df.empty: return 0
         now = datetime.now(timezone.utc)
+        insert_df = df.copy()
+        insert_df["symbol"] = symbol
+        insert_df["source"] = "dhan_historical"
+        insert_df["ingested_at"] = now
+        
         rows_inserted = 0
         with DuckDBClient(self._db_path) as db:
-            for _, row in df.iterrows():
-                try:
-                    db.execute(
-                        """
-                        INSERT INTO fo_history
-                          (symbol, date, expiry_date, strike_price, option_type,
-                           open, high, low, close, settle_price, contracts, oi,
-                           change_in_oi, source, ingested_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                'dhan_historical', ?)
-                        ON CONFLICT (symbol, date, expiry_date, strike_price, option_type)
-                        DO NOTHING
-                        """,
-                        (
-                            symbol, row["date"], row["expiry_date"],
-                            row["strike_price"], row["option_type"],
-                            row["open"], row["high"], row["low"], row["close"],
-                            row["settle_price"], row["contracts"],
-                            row["oi"], row["change_in_oi"], now,
-                        ),
-                    )
-                    rows_inserted += 1
-                except Exception as exc:  # noqa: BLE001
-                    _log.debug("upsert_fo_history: skipped row %s: %s", symbol, exc)
+            try:
+                db.conn.register("temp_fo_df", insert_df)
+                db.conn.execute(
+                    """
+                    INSERT INTO fo_history
+                      (symbol, date, expiry_date, strike_price, option_type,
+                       open, high, low, close, settle_price, contracts, oi,
+                       change_in_oi, source, ingested_at)
+                    SELECT symbol, CAST(date AS DATE), CAST(expiry_date AS DATE), CAST(strike_price AS DOUBLE), CAST(option_type AS VARCHAR),
+                           CAST(open AS DOUBLE), CAST(high AS DOUBLE), CAST(low AS DOUBLE), CAST(close AS DOUBLE), CAST(settle_price AS DOUBLE), CAST(contracts AS INTEGER), CAST(oi AS INTEGER),
+                           CAST(change_in_oi AS INTEGER), source, CAST(ingested_at AS TIMESTAMP)
+                    FROM temp_fo_df
+                    ON CONFLICT (symbol, date, expiry_date, strike_price, option_type) DO NOTHING
+                    """
+                )
+                db.conn.unregister("temp_fo_df")
+                rows_inserted = len(insert_df)
+            except Exception as exc:
+                _log.error("upsert_fo_history: dataframe insert failed: %s", exc)
         return rows_inserted
 
     # ── Internal: max-pain calculation ───────────────────────────────────────
@@ -991,8 +1047,10 @@ class DhanBulkDownloader:
     # ── Internal: HTTP helpers ────────────────────────────────────────────────
 
     def _get_headers(self) -> dict:
+        import random
+        token = random.choice(self._access_tokens)
         return {
-            "access-token":  self._access_token,
+            "access-token":  token,
             "client-id":     self._client_id,
             "Content-Type":  "application/json",
             "Accept":        "application/json",

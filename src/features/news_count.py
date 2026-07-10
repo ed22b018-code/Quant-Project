@@ -32,7 +32,7 @@ UTC = timezone.utc
 def _count_news(db_path: str, symbol: str, as_of: datetime, lookback_hours: float) -> float:
     as_of_utc = as_of if as_of.tzinfo else as_of.replace(tzinfo=UTC)
     cutoff = as_of_utc - timedelta(hours=lookback_hours)
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         rows = con.execute(
             "SELECT COUNT(*) FROM news "
             "WHERE first_knowable_at < ? "

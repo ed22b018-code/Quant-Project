@@ -107,13 +107,16 @@ def _make_scored_df(
 
 # ── 1. Device detection ───────────────────────────────────────────────────────
 
-def test_device_is_cpu_on_this_machine():
-    """On this no-GPU dev machine, device is always 'cpu'.
+def test_device_is_cpu_on_this_machine(monkeypatch):
+    """When torch is installed but CUDA is unavailable, device falls back to 'cpu'.
 
-    Covers the case where torch is not installed (ImportError → cpu)
-    AND the case where torch is installed but CUDA unavailable.
+    Covers the case where torch is installed but CUDA unavailable.
     This is the device-fallback test requested in the checkpoint spec.
     """
+    fake_torch = types.ModuleType("torch")
+    fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    
     scorer = FinBERTScorer()
     assert scorer.device == "cpu"
 

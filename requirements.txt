@@ -31,7 +31,7 @@ pytest-cov==7.1.0
 # requests
 feedparser==6.0.12    # RSS news parsing
 # websocket-client
-# upstox-python-api    # Upstox broker free-tier tick feed + option chain
+# upstox-python    # Upstox broker free-tier tick feed + option chain
 
 # ── Phase 2: ML + calibration (installed for Checkpoints 2.3+2.4) ────────────
 joblib==1.5.3

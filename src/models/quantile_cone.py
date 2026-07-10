@@ -73,7 +73,6 @@ class QuantileConeTrainer:
         base_params: dict[str, Any] = {
             "objective": "quantile",
             "verbose": -1,
-            "n_jobs": -1,
         }
         user_params = dict(self.lgbm_params)
         n_rounds = int(user_params.pop("num_boost_round", 100))

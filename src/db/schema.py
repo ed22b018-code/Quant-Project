@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS dhan_instruments (
     expiry_date     DATE,
     strike_price    DOUBLE,
     ingested_at     TIMESTAMPTZ  NOT NULL,
-    PRIMARY KEY (security_id)
+    PRIMARY KEY (security_id, exchange, instrument_type)
 );
 """
 

@@ -331,7 +331,7 @@ def news_sentiment(symbol: str, as_of: datetime, db_path: str) -> float | None:
     as_of_utc = as_of if as_of.tzinfo else as_of.replace(tzinfo=UTC)
     lookback = as_of_utc - timedelta(hours=24)
 
-    with duckdb.connect(db_path) as con:
+    with duckdb.connect(db_path, read_only=True, config={'threads': '1'}) as con:
         df = con.execute(
             "SELECT news_id, headline, body, source, first_knowable_at "
             "FROM news "

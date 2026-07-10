@@ -7,6 +7,9 @@ from typing import Any
 
 import duckdb
 import pandas as pd
+import threading
+
+_DB_LOCK = threading.Lock()
 
 
 class DuckDBClient:
@@ -23,7 +26,12 @@ class DuckDBClient:
         self._conn: duckdb.DuckDBPyConnection | None = None
 
     def __enter__(self) -> "DuckDBClient":
-        self._conn = duckdb.connect(self.db_path)
+        _DB_LOCK.acquire()
+        try:
+            self._conn = duckdb.connect(self.db_path)
+        except Exception:
+            _DB_LOCK.release()
+            raise
         return self
 
     def __exit__(
@@ -32,9 +40,12 @@ class DuckDBClient:
         exc_val: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        try:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+        finally:
+            _DB_LOCK.release()
 
     @property
     def conn(self) -> duckdb.DuckDBPyConnection:
