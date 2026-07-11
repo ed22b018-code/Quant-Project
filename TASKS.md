@@ -402,6 +402,21 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
 - CPU-only: no `device("cuda")` in src/; invariant test extended to cover new dirs
 - Every backtest stamps which data sources and gates were active
 
+### Checkpoint 2.6.1 — Universe Correction (2026-07-11) ✅
+- [x] Reconciled config universe (111 symbols) vs actual DB (111 symbols with data)
+      Result: 106 in both; 5 in config only (no data); 5 in DB only (missing from config)
+- [x] Diagnosed all mismatches — ADANIENT/AXISBANK/WIPRO/CONCOR/FEDERALBNK accidentally omitted;
+      CHOLAFIN/LTIM/MCDOWELL-N/TATAMOTORS/ZOMATO had failed downloads (zero rows in DB)
+- [x] Defined principled eligibility rules: Rule 1 (has data), Rule 2 (last >= 2026-01-01), Rule 3 (>= 600 trading days)
+- [x] Built `tools/build_universe.py` — reproducible, auditable three-bucket eligibility script
+- [x] Replaced hardcoded config.toml symbols with 109 DB-derived symbols + structured exclusion comments
+- [ ] **Deferred to 3060**: Re-download CHOLAFIN/LTIM/MCDOWELL-N/TATAMOTORS/ZOMATO after fixing instrument-master issue
+- [ ] **Deferred to 3060**: Re-download ADANIPORTS (9 pending chunks to complete)
+- [ ] **Deferred to 3060**: Re-run training + evaluation on corrected universe (~114 target)
+      ⚠️ The +0.33% result from Checkpoint 2.6 was on 106 symbols (missing ADANIENT/AXISBANK/WIPRO/
+         CONCOR/FEDERALBNK; padded with 5 phantom entries). INVALID for the corrected universe.
+         Must be re-run after re-downloads complete to get a valid backtest number.
+
 ## Phase 3 — Pattern Library
 - [ ] Hypothesis register (pre-registered, mechanism required)
 - [ ] Conditional rule miner (condition → outcome distribution, N + CI)

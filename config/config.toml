@@ -49,41 +49,57 @@ backoff_base_seconds  = 1.0    # exponential backoff base for 429/5xx errors
 
 # ── Stock universe ────────────────────────────────────────────────────────────
 [universe]
-# NSE F&O segment — STATIC list for Phase 0.
+# NSE F&O segment — derived from database via tools/build_universe.py (2026-07-11).
+# DO NOT hand-edit this list. Instead run:
+#   python tools/build_universe.py --output-toml
+# then paste the output here and commit.
 #
-# IMPORTANT: The actual F&O eligibility list changes quarterly (NSE adds/removes
-# scrips based on liquidity criteria). This list was assembled from the NSE F&O
-# underlyings list as of mid-2025.
-#
-# Phase 1 TODO: replace with dynamic eligibility query from:
-#   https://www.nseindia.com/products-services/equity-derivatives-list-underlyings-information
+# Eligibility rules (applied by build_universe.py):
+#   Rule 1  symbol has rows in ohlcv_intraday with timeframe='1'
+#   Rule 2  MAX(ts)::DATE >= '2026-01-01'  (data covers the sealed test period)
+#   Rule 3  COUNT(DISTINCT CAST(ts AS DATE)) >= 600  (~80% of the 3-year window)
 #
 # Symbols use NSE ticker format.  "M&M" and "BAJAJ-AUTO" contain special chars —
 # these are the official NSE symbols and must not be normalised away.
+#
+# INTERIM universe: 109 symbols (derived 2026-07-11)
+# TARGET universe:  ~114 symbols — add the 5 ELIGIBLE-PENDING-REDOWNLOAD symbols
+#                   once re-downloaded on the 3060 (see tools/build_universe.py).
+#
+# EXCLUDED symbols (do not add without re-downloading):
+#   CHOLAFIN     -- API returned empty data on 3060 (security_id mismatch); eligible once fixed
+#   LTIM         -- all retries exhausted; instrument-master security_id issue; eligible once fixed
+#   MCDOWELL-N   -- hyphenated ticker causes instrument-master lookup failure; eligible once fixed
+#   TATAMOTORS   -- all retries exhausted; instrument-master security_id issue; eligible once fixed
+#   ZOMATO       -- all retries exhausted; instrument-master security_id issue; eligible once fixed
+#   ADANIPORTS   -- incomplete download (4/13 chunks done, data ends 2025-06-23); re-download needed
+#   360ONE       -- only 71 trading days (listed too recently for full 3-year window)
 
-symbols = ["RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", 
-  "APOLLOHOSP"   , "ASIANPAINT"   , "BAJAJ-AUTO"   , "BAJAJFINSV"   , "BAJFINANCE"   ,
-  "BHARTIARTL"   , "BPCL"         , "BRITANNIA"    , "CIPLA"        , "COALINDIA"    ,
-  "DIVISLAB"     , "DRREDDY"      , "EICHERMOT"    , "GRASIM"       , "HCLTECH"      ,
-  "HDFCLIFE"     , "HEROMOTOCO"   , "HINDALCO"     , "HINDUNILVR"   , "INDUSINDBK"   ,
-  "ITC"          , "JSWSTEEL"     , "KOTAKBANK"    , "LT"           , "M&M"          ,
-  "MARUTI"       , "NESTLEIND"    , "NTPC"         , "ONGC"         , "POWERGRID"    ,
-  "SBILIFE"      , "SHREECEM"     , "SUNPHARMA"    , "TATAMOTORS"   , "TATASTEEL"    ,
-  "TATACONSUM"   , "TECHM"        , "TITAN"        , "ULTRACEMCO"   , "UPL"          ,
-  "ABB"          , "ACC"          , "AMBUJACEM"    , "AUROPHARMA"   , "BALKRISIND"   ,
-  "BANDHANBNK"   , "BANKBARODA"   , "BATAINDIA"    , "BEL"          , "BHEL"         ,
-  "BIOCON"       , "BOSCHLTD"     , "CANBK"        , "CHOLAFIN"     , "CONCOR"       ,
-  "CUMMINSIND"   , "DMART"        , "ESCORTS"      , "EXIDEIND"     , "FEDERALBNK"   ,
-  "GAIL"         , "GODREJCP"     , "GRANULES"     , "HAL"          , "HAVELLS"      ,
-  "IDFCFIRSTB"   , "IGL"          , "INDHOTEL"     , "INDIGO"       , "IRCTC"        ,
-  "JUBLFOOD"     , "KPITTECH"     , "LICHSGFIN"    , "LTIM"         , "LUPIN"        ,
-  "MANAPPURAM"   , "MCDOWELL-N"   , "MGL"          , "MOTHERSON"    , "MPHASIS"      ,
-  "MUTHOOTFIN"   , "NATIONALUM"   , "NAUKRI"       , "NMDC"         , "OFSS"         ,
-  "PAGEIND"      , "PERSISTENT"   , "PETRONET"     , "PFC"          , "PIIND"        ,
-  "PNB"          , "POLYCAB"      , "RBLBANK"      , "RECLTD"       , "RVNL"         ,
-  "SAIL"         , "SIEMENS"      , "TATAELXSI"    , "TATAPOWER"    , "TORNTPHARM"   ,
-  "TRENT"        , "TVSMOTOR"     , "VEDL"         , "VOLTAS"       , "ZOMATO"       ,
+symbols = [
+  "ABB",        "ACC",        "ADANIENT",   "AMBUJACEM",  "APOLLOHOSP",
+  "ASIANPAINT", "AUROPHARMA", "AXISBANK",   "BAJAJ-AUTO", "BAJAJFINSV",
+  "BAJFINANCE", "BALKRISIND", "BANDHANBNK", "BANKBARODA", "BATAINDIA",
+  "BEL",        "BHARTIARTL", "BHEL",       "BIOCON",     "BOSCHLTD",
+  "BPCL",       "BRITANNIA",  "CANBK",      "CIPLA",      "COALINDIA",
+  "CONCOR",     "CUMMINSIND", "DIVISLAB",   "DMART",      "DRREDDY",
+  "EICHERMOT",  "ESCORTS",    "EXIDEIND",   "FEDERALBNK", "GAIL",
+  "GODREJCP",   "GRANULES",   "GRASIM",     "HAL",        "HAVELLS",
+  "HCLTECH",    "HDFCBANK",   "HDFCLIFE",   "HEROMOTOCO", "HINDALCO",
+  "HINDUNILVR", "ICICIBANK",  "IDFCFIRSTB", "IGL",        "INDHOTEL",
+  "INDIGO",     "INDUSINDBK", "INFY",       "IRCTC",      "ITC",
+  "JSWSTEEL",   "JUBLFOOD",   "KOTAKBANK",  "KPITTECH",   "LICHSGFIN",
+  "LT",         "LUPIN",      "M&M",        "MANAPPURAM", "MARUTI",
+  "MGL",        "MOTHERSON",  "MPHASIS",    "MUTHOOTFIN", "NATIONALUM",
+  "NAUKRI",     "NESTLEIND",  "NMDC",       "NTPC",       "OFSS",
+  "ONGC",       "PAGEIND",    "PERSISTENT", "PETRONET",   "PFC",
+  "PIIND",      "PNB",        "POLYCAB",    "POWERGRID",  "RBLBANK",
+  "RECLTD",     "RELIANCE",   "RVNL",       "SAIL",       "SBILIFE",
+  "SBIN",       "SHREECEM",   "SIEMENS",    "SUNPHARMA",  "TATACONSUM",
+  "TATAELXSI",  "TATAPOWER",  "TATASTEEL",  "TCS",        "TECHM",
+  "TITAN",      "TORNTPHARM", "TRENT",      "TVSMOTOR",   "ULTRACEMCO",
+  "UPL",        "VEDL",       "VOLTAS",     "WIPRO",
 ]
+# 109 symbols derived 2026-07-11 (Rule 2 >= 2026-01-01, Rule 3 >= 600 days)
 
 # ── Trading / paper engine ────────────────────────────────────────────────────
 [trading]

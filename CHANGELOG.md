@@ -2,6 +2,73 @@
 
 ---
 
+## Universe Correction (2026-07-11) ✅
+
+**Corrected the training universe from a hand-assembled 111-symbol list to a
+DB-derived 109-symbol list based on explicit eligibility rules. The prior
++0.33% backtest result from Checkpoint 2.6 was on a different (and partially
+wrong) universe and must be re-run on the corrected universe.**
+
+### Root cause
+
+The `config.toml` universe was assembled manually. Reconciliation of config vs DB revealed:
+
+| Bucket | Count | Detail |
+|---|---|---|
+| In both config AND database | 106 | Correctly used in training |
+| In config, no DB data | 5 | CHOLAFIN, LTIM, MCDOWELL-N, TATAMOTORS, ZOMATO — failed downloads; zero rows |
+| In database, not in config | 5 | ADANIENT, AXISBANK, WIPRO, CONCOR, FEDERALBNK — accidentally omitted |
+
+The 3060 training run effectively used 106 symbols (not 111), and was missing 3 full-data eligible symbols.
+
+### Eligibility rules
+
+| Rule | Criterion |
+|---|---|
+| Rule 1 | Symbol has rows in `ohlcv_intraday` with `timeframe='1'` |
+| Rule 2 | `MAX(ts)::DATE >= '2026-01-01'` — data covers the sealed test period |
+| Rule 3 | `COUNT(DISTINCT CAST(ts AS DATE)) >= 600` — ~80% of the 3-year window |
+
+### Results
+
+- **INCLUDED (109)**: ABB, ACC, ADANIENT, AMBUJACEM, APOLLOHOSP, ASIANPAINT, AUROPHARMA,
+  AXISBANK, BAJAJ-AUTO, BAJAJFINSV, BAJFINANCE, BALKRISIND, BANDHANBNK, BANKBARODA, BATAINDIA,
+  BEL, BHARTIARTL, BHEL, BIOCON, BOSCHLTD, BPCL, BRITANNIA, CANBK, CIPLA, COALINDIA, CONCOR,
+  CUMMINSIND, DIVISLAB, DMART, DRREDDY, EICHERMOT, ESCORTS, EXIDEIND, FEDERALBNK, GAIL,
+  GODREJCP, GRANULES, GRASIM, HAL, HAVELLS, HCLTECH, HDFCBANK, HDFCLIFE, HEROMOTOCO, HINDALCO,
+  HINDUNILVR, ICICIBANK, IDFCFIRSTB, IGL, INDHOTEL, INDIGO, INDUSINDBK, INFY, IRCTC, ITC,
+  JSWSTEEL, JUBLFOOD, KOTAKBANK, KPITTECH, LICHSGFIN, LT, LUPIN, M&M, MANAPPURAM, MARUTI,
+  MGL, MOTHERSON, MPHASIS, MUTHOOTFIN, NATIONALUM, NAUKRI, NESTLEIND, NMDC, NTPC, OFSS,
+  ONGC, PAGEIND, PERSISTENT, PETRONET, PFC, PIIND, PNB, POLYCAB, POWERGRID, RBLBANK, RECLTD,
+  RELIANCE, RVNL, SAIL, SBILIFE, SBIN, SHREECEM, SIEMENS, SUNPHARMA, TATACONSUM, TATAELXSI,
+  TATAPOWER, TATASTEEL, TCS, TECHM, TITAN, TORNTPHARM, TRENT, TVSMOTOR, ULTRACEMCO, UPL,
+  VEDL, VOLTAS, WIPRO
+
+- **ELIGIBLE-PENDING-REDOWNLOAD (5)**: CHOLAFIN, LTIM, MCDOWELL-N, TATAMOTORS, ZOMATO —
+  valid NSE F&O constituents excluded only due to download failure on the 3060.
+  Target universe = ~114 once re-downloaded.
+
+- **EXCLUDED-BY-RULE (2)**: ADANIPORTS (4/13 chunks done, data ends 2025-06-23 — before
+  test period; re-download needed); 360ONE (71 trading days — listed too recently for 3-year window)
+
+### Impact on prior result
+
+> **The +0.33% backtest result from Checkpoint 2.6 was evaluated on 106 symbols:**
+> - Missing: ADANIENT, AXISBANK, WIPRO, CONCOR, FEDERALBNK (full data; would have been included)
+> - Padded with: CHOLAFIN, LTIM, MCDOWELL-N, TATAMOTORS, ZOMATO (zero rows — phantom entries)
+>
+> **This result is not valid for the corrected 109-symbol universe. It must be re-run on the
+> 3060 after re-downloads complete.**
+
+### New artifacts
+
+- `tools/build_universe.py` — reproducible eligibility script; run instead of hand-editing the symbol list
+- `config.toml [universe]` — 109 symbols with structured comments documenting eligibility rules and each excluded symbol
+
+### Test count: 514 / 514 (no regressions from universe fix)
+
+---
+
 ## Checkpoint 2.6 — Full 111-Stock Dataset Build & Evaluation (2026-07-04) ✅
 
 **Massive database optimization and the first complete end-to-end model evaluation on the sealed test set.**
