@@ -13,6 +13,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from typing import Literal
+
 from pydantic import BaseModel, field_validator, model_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -59,6 +61,34 @@ class UniverseConfig(BaseModel):
         return v
 
 
+class CostConfig(BaseModel):
+    """Rate parameters for NSE intraday equity cost simulation.
+
+    All rates sourced from published regulatory/exchange schedules.
+    When official rates change, update config.toml [trading.costs] only —
+    no code changes needed anywhere else.
+    """
+    brokerage_model: Literal["flat", "percentage"] = "percentage"
+    brokerage_pct: float = 0.0003
+    brokerage_flat_cap: float = 20.0
+    stt_intraday_sell_pct: float = 0.00025
+    exchange_charges_pct: float = 0.0000297
+    sebi_fees_pct: float = 0.000001
+    gst_pct: float = 0.18
+    stamp_duty_intraday_buy_pct: float = 0.00003
+
+    @field_validator(
+        "brokerage_pct", "brokerage_flat_cap", "stt_intraday_sell_pct",
+        "exchange_charges_pct", "sebi_fees_pct", "gst_pct",
+        "stamp_duty_intraday_buy_pct",
+    )
+    @classmethod
+    def _non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"Cost rate must be >= 0, got {v}")
+        return v
+
+
 class TradingConfig(BaseModel):
     token_pool: int
     primary_horizon_min: int
@@ -72,6 +102,7 @@ class TradingConfig(BaseModel):
     min_cash_reserve_pct: float
     drawdown_pause_pct: float
     max_sector_exposure_pct: float
+    costs: CostConfig
 
     @model_validator(mode="after")
     def _primary_in_all_horizons(self) -> "TradingConfig":

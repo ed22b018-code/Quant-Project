@@ -2,6 +2,60 @@
 
 ---
 
+## Checkpoint 4.1 — Cost Simulation (2026-07-11) ✅
+
+**Full NSE intraday equity cost stack — all components configurable, every rate
+verified against hand-calculated ground truth to the rupee. 39 new tests.**
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `src/trading/__init__.py` | Module root |
+| `src/trading/costs.py` | `CostSimulator`, `TradeCostBreakdown`, `TradeResult` |
+| `tests/test_costs.py` | 39 tests — 4 hand-calculated scenarios + invariants + config |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `config/config.toml` | New `[trading.costs]` section (7 rate params + source/as-of comments) |
+| `src/config.py` | `CostConfig` pydantic sub-model; `TradingConfig.costs: CostConfig` |
+
+### Cost components (intraday MIS, NSE equity cash)
+
+| Component | Leg | Rate | Source |
+|---|---|---|---|
+| Brokerage | buy + sell | min(0.03% × turnover, ₹20) each | Discount broker schedule; 2024-07-01 |
+| STT | sell only | 0.025% of sell-leg turnover | Finance Act 2024; 2024-07-01 |
+| Exchange charges | buy + sell | 0.00297% per leg | NSE fee schedule FY2024-25; 2024-07-01 |
+| SEBI fees | total turnover | 0.0001% (₹10/crore) | SEBI circular; 2024-07-01 |
+| GST | derived | 18% on (brokerage + exchange + SEBI) | GST Act; 2024-07-01 |
+| Stamp duty | buy only | 0.003% of buy-leg turnover | Indian Stamp Act 2019; 2020-07-01 |
+
+### Hand-verified test scenarios (expected vs actual, to the rupee)
+
+| Scenario | Trade | Gross P&L | Total costs | Net P&L |
+|---|---|---|---|---|
+| 1 — LONG profit, brokerage capped | 100 × ₹2,500 → ₹2,520 | ₹2,000.00 | ₹135.885452 | ₹1,864.114548 |
+| 2 — SHORT profit, brokerage uncapped | 50 × ₹1,000 → ₹990 | ₹500.00 | ₹52.812487 | ₹447.187513 |
+| 3 — LONG loss, costs deepen it | 20 × ₹5,000 → ₹4,950 | -₹1,000.00 | ₹82.158974 | -₹1,082.158974 |
+| 4a — tiny trade, pct brokerage | 5 × ₹100 → ₹102 | ₹10.00 | ₹0.537 | ₹9.463 |
+| 4b — same trade, flat brokerage | 5 × ₹100 → ₹102 | ₹10.00 | ₹47.379 | **-₹37.379** |
+
+Scenario 4 shows why flat overhead destroys small positions — a ₹10 gross profit becomes a
+₹37 net loss when brokerage is ₹20/order. The percentage model correctly handles all sizes.
+
+### Structural invariant
+
+`TradeResult.__post_init__` asserts `net_pnl == gross_pnl - costs.total`.
+Constructing a `TradeResult` with wrong `net_pnl` raises `ValueError` immediately.
+Gross P&L is preserved as a breakdown field only; it can never become the headline figure.
+
+### Test count: 553 / 553 passing (+39 new)
+
+---
+
 ## Universe Correction (2026-07-11) ✅
 
 **Corrected the training universe from a hand-assembled 111-symbol list to a

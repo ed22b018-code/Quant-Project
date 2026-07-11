@@ -125,6 +125,43 @@ min_cash_reserve_pct       = 0.10   # always keep ≥ 10 % cash
 drawdown_pause_pct         = 0.20   # pause new entries if pool drops 20 % from peak
 max_sector_exposure_pct    = 0.25   # no single sector > 25 % exposure
 
+# ── Cost simulation rates ─────────────────────────────────────────────────────
+# All rates are for NSE equity cash segment, intraday MIS orders.
+# When official rates change, update ONLY these values — no code changes required.
+# Verify against: NSE fee schedule, CBDT STT circular, SEBI circular, GST Act.
+[trading.costs]
+
+# Brokerage model.
+#   "flat"       — always brokerage_flat_cap per order, regardless of size.
+#   "percentage" — min(brokerage_pct × turnover, brokerage_flat_cap) per order.
+# Source: Zerodha / Fyers discount-broker fee structure; as-of 2024-07-01.
+brokerage_model    = "percentage"
+brokerage_pct      = 0.0003    # 0.03% of order turnover
+brokerage_flat_cap = 20.0      # ₹20 cap per order (intraday MIS)
+
+# Securities Transaction Tax — intraday equity.
+# Applied on the SELL leg only (both LONG exits and SHORT entries).
+# Source: Finance Act 2024, Schedule STT; as-of 2024-07-01.
+stt_intraday_sell_pct = 0.00025    # 0.025% of sell-leg turnover
+
+# NSE equity cash segment transaction charges.
+# Applied per side (buy AND sell independently), then summed.
+# Source: NSE fee schedule FY 2024-25; as-of 2024-07-01.
+exchange_charges_pct = 0.0000297   # ₹2.97 per lakh of turnover per side
+
+# SEBI turnover fees — applied on total (buy + sell) turnover.
+# Source: SEBI circular SEBI/HO/MRD/2023; as-of 2024-07-01.
+sebi_fees_pct = 0.000001           # ₹10 per crore (= ₹0.10 per lakh = 0.001%)
+
+# GST on (brokerage + exchange charges + SEBI fees).
+# NOT applied on STT or stamp duty (those are separate statutory levies).
+# Source: GST Act India, standard rate; as-of 2024-07-01.
+gst_pct = 0.18                     # 18%
+
+# Stamp duty — applied on the BUY leg only.
+# Source: Indian Stamp Act 2019, Schedule I Art. 5(c); effective 2020-07-01.
+stamp_duty_intraday_buy_pct = 0.00003   # 0.003% of buy-leg turnover
+
 # ── Model / ML ────────────────────────────────────────────────────────────────
 [model]
 random_seed = 42   # fixed for reproducibility (DESIGN.md rule 5)

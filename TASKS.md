@@ -427,13 +427,37 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
 - [ ] Periodic decay-retirement check
 
 ## Phase 4 — Scanner + Paper-Trading Engine
+
+### Checkpoint 4.1 — Cost Simulation (2026-07-11) ✅
+- [x] `src/trading/costs.py` — `CostSimulator`, `TradeCostBreakdown`, `TradeResult`
+      Full NSE intraday MIS cost stack: brokerage (flat or %-with-cap), STT (sell leg),
+      exchange charges (both legs), SEBI fees (total turnover), GST (on brokerage+exchange+SEBI),
+      stamp duty (buy leg). All rates in config.toml [trading.costs] — zero code changes on rate update.
+- [x] `config/config.toml [trading.costs]` — 7 rate parameters with source + as-of date comments
+- [x] `src/config.py` — `CostConfig` pydantic sub-model added; `TradingConfig.costs: CostConfig`
+- [x] `tests/test_costs.py` — 39 tests, 4 hand-calculated scenarios verified to the rupee
+      Scenario 1: LONG profit  100×₹2500→₹2520  gross=₹2000  costs=₹135.89  net=₹1864.11
+      Scenario 2: SHORT profit  50×₹1000→₹990   gross=₹500   costs=₹52.81   net=₹447.19
+      Scenario 3: LONG loss     20×₹5000→₹4950  gross=-₹1000 costs=₹82.16   net=-₹1082.16
+      Scenario 4: tiny 5×₹100→₹102 — pct model net=₹9.46 vs flat model net=-₹37.38 (cap overhead kills small trades)
+- [x] Structural invariant: `TradeResult.__post_init__` asserts net_pnl==gross_pnl-costs.total;
+      impossible to construct a TradeResult with a wrong net figure
+
+### Checkpoint 4.2 — Slippage Model (pending)
+- [ ] Slippage as separate configurable component (bps or spread-based)
+- [ ] Stamped as estimate in TradeResult so reports flag slippage assumptions
+
+### Checkpoint 4.3 — Paper Execution Engine (pending)
+- [ ] `ExecutionEngine` interface (abstract); `PaperExecutionEngine` implementation
+- [ ] Trade lifecycle: place → fill (price + slippage) → apply costs → track position → exit → realize net P&L
+- [ ] Paper portfolio: cash, open positions, realized/unrealized P&L (always cost-adjusted)
+
+### Remaining Phase 4
 - [ ] Stage-1 cheap screen (100 stocks, arithmetic only, ms-scale)
 - [ ] Stage-2 full scoring (FinBERT + models + regime → top-10)
 - [ ] Selection-bias guard (higher confidence bar for cherry-picked top-10)
 - [ ] Regime classifier (risk-on / neutral / risk-off)
 - [ ] Regime throttle on confidence + sizing
-- [ ] Paper-trading engine (token pool, MIS/CNC, auto square-off 15:15)
-- [ ] Cost simulator (Zerodha/Upstox-style, deliberately pessimistic)
 - [ ] Hard guardrails (DESIGN.md §12, cannot be overridden)
 - [ ] Meta-label sizing model (fractional Kelly / vol-target)
 - [ ] Two-tier monitor (watchlist + open-position low-latency loop)
