@@ -2,6 +2,65 @@
 
 ---
 
+## Checkpoint 4.2 + 4.3 — Slippage Model + Paper Execution Engine (2026-07-14) ✅
+
+**Slippage as a swappable ABC, paper engine with full cash accounting, and 50 new tests.**
+Portfolio invariant `cash == initial_cash + sum(net_pnl)` proved for LONG and SHORT.
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `src/trading/slippage.py` | `SlippageEstimate`, `SlippageModel` ABC, `FixedBpsSlippage` |
+| `src/trading/execution.py` | `ExecutionEngine` ABC, `PaperExecutionEngine`, supporting dataclasses |
+| `tests/test_slippage.py` | 21 tests — direction, bps math, is_estimate invariant, estimate composition |
+| `tests/test_execution.py` | 29 tests — round-trip P&L, portfolio invariant, exit types, interface swap |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `config/config.toml` | New `[trading.slippage]` section (`model`, `entry_bps`, `exit_bps`) |
+| `src/config.py` | `SlippageConfig` pydantic sub-model; `TradingConfig.slippage: SlippageConfig` |
+
+### Slippage sign convention
+
+| Direction | Leg | Fill vs Quoted |
+|---|---|---|
+| LONG | entry (buy) | higher — market impact |
+| LONG | exit (sell) | lower — bid side |
+| SHORT | entry (sell) | lower — bid side |
+| SHORT | exit (buy) | higher — ask side |
+
+Fills always go against the trader — slippage never creates a windfall.
+
+### Structural invariants
+
+- `SlippageEstimate.is_estimate` is always `True`; `__post_init__` raises if `False` is passed.
+  Structural reminder: slippage is a model estimate, never a measured fill.
+- `ClosedTrade.net_pnl == trade_result.net_pnl`; enforced in `__post_init__`.
+- Portfolio cash invariant: `cash == initial_cash + sum(net_pnl for all closed trades)`.
+  Proved algebraically and tested for LONG, SHORT, multiple trades, with and without slippage.
+
+### Interface swap proof
+
+`MockAlternativeEngine(ExecutionEngine)` — a minimal concrete implementation — satisfies the
+ABC without touching `PaperExecutionEngine`. Real-broker engines can replace the paper engine
+without changing any caller. Test `test_mock_engine_satisfies_abc` verifies this.
+
+### Default config
+
+```toml
+[trading.slippage]
+model     = "fixed_bps"
+entry_bps = 2.0   # 2 bps = 0.02% at entry (conservative NSE mid-cap estimate)
+exit_bps  = 2.0   # 2 bps = 0.02% at exit
+```
+
+### Test count: 603 / 603 passing (+50 new: 21 slippage + 29 execution)
+
+---
+
 ## Checkpoint 4.1 — Cost Simulation (2026-07-11) ✅
 
 **Full NSE intraday equity cost stack — all components configurable, every rate

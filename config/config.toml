@@ -162,6 +162,15 @@ gst_pct = 0.18                     # 18%
 # Source: Indian Stamp Act 2019, Schedule I Art. 5(c); effective 2020-07-01.
 stamp_duty_intraday_buy_pct = 0.00003   # 0.003% of buy-leg turnover
 
+# ── Slippage estimates ────────────────────────────────────────────────────────
+# All values are ESTIMATES — slippage is modelled, not measured.
+# "fixed_bps" applies uniform bps at entry and exit, always unfavourably.
+# When model or bps change, update ONLY these values — no code changes required.
+[trading.slippage]
+model     = "fixed_bps"
+entry_bps = 2.0   # 2 bps = 0.02% at entry (conservative mid-cap NSE estimate)
+exit_bps  = 2.0   # 2 bps = 0.02% at exit
+
 # ── Model / ML ────────────────────────────────────────────────────────────────
 [model]
 random_seed = 42   # fixed for reproducibility (DESIGN.md rule 5)

@@ -89,6 +89,25 @@ class CostConfig(BaseModel):
         return v
 
 
+class SlippageConfig(BaseModel):
+    """Parameters for the slippage model used in paper-trading simulation.
+
+    All slippage values are estimates, not measured fills.
+    When model or bps change, update config.toml [trading.slippage] only.
+    """
+
+    model: Literal["fixed_bps"] = "fixed_bps"
+    entry_bps: float = 2.0   # basis points applied at entry
+    exit_bps: float = 2.0    # basis points applied at exit
+
+    @field_validator("entry_bps", "exit_bps")
+    @classmethod
+    def _non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"Slippage bps must be >= 0, got {v}")
+        return v
+
+
 class TradingConfig(BaseModel):
     token_pool: int
     primary_horizon_min: int
@@ -103,6 +122,7 @@ class TradingConfig(BaseModel):
     drawdown_pause_pct: float
     max_sector_exposure_pct: float
     costs: CostConfig
+    slippage: SlippageConfig
 
     @model_validator(mode="after")
     def _primary_in_all_horizons(self) -> "TradingConfig":

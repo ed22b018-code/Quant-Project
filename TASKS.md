@@ -443,14 +443,36 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
 - [x] Structural invariant: `TradeResult.__post_init__` asserts net_pnl==gross_pnl-costs.total;
       impossible to construct a TradeResult with a wrong net figure
 
-### Checkpoint 4.2 — Slippage Model (pending)
-- [ ] Slippage as separate configurable component (bps or spread-based)
-- [ ] Stamped as estimate in TradeResult so reports flag slippage assumptions
+### Checkpoint 4.2 — Slippage Model (2026-07-14) ✅
+- [x] `src/trading/slippage.py` — `SlippageEstimate` (frozen, is_estimate always True),
+      `SlippageModel` ABC (apply_entry, apply_exit, estimate), `FixedBpsSlippage`
+- [x] `config/config.toml [trading.slippage]` — model, entry_bps, exit_bps (default 2+2)
+- [x] `src/config.py` — `SlippageConfig` pydantic sub-model; `TradingConfig.slippage: SlippageConfig`
+- [x] `tests/test_slippage.py` — 21 tests:
+      Direction correctness (4): LONG entry higher, LONG exit lower, SHORT entry lower, SHORT exit higher;
+      Exact bps math (6): 2bps, 5bps, 10bps, zero-bps no-slippage for both directions;
+      is_estimate invariant (3): always True from model, False raises, both directions;
+      estimate() composition (6): model_name propagated, entry/exit costs, total = entry+exit,
+                                  short direction costs, zero-bps fields match quoted;
+      ABC compliance (2): abstract not instantiable, FixedBps is concrete SlippageModel
 
-### Checkpoint 4.3 — Paper Execution Engine (pending)
-- [ ] `ExecutionEngine` interface (abstract); `PaperExecutionEngine` implementation
-- [ ] Trade lifecycle: place → fill (price + slippage) → apply costs → track position → exit → realize net P&L
-- [ ] Paper portfolio: cash, open positions, realized/unrealized P&L (always cost-adjusted)
+### Checkpoint 4.3 — Paper Execution Engine (2026-07-14) ✅
+- [x] `src/trading/execution.py` — `ExitReason` enum (TARGET_HIT/STOP_HIT/TIME_BASED/MANUAL);
+      `FillResult` (frozen, is_paper=True); `ClosedTrade` (frozen, net_pnl==trade_result.net_pnl invariant);
+      `OpenPosition` (unrealized_pnl); `Portfolio` (frozen, total_realized_net_pnl());
+      `ExecutionEngine` ABC; `PaperExecutionEngine`
+- [x] Cash accounting: LONG entry -=, exit += exit_filled - costs; SHORT entry +=, exit -= exit_filled + costs
+- [x] Portfolio invariant: cash == initial_cash + sum(net_pnl) — proved algebraically, tested for all cases
+- [x] `tests/test_execution.py` — 29 tests:
+      Round-trip net_pnl matches CostSimulator (LONG + SHORT + loss + invariant check);
+      All 4 exit reasons accepted;
+      Portfolio cash invariant (1 LONG, 1 SHORT, winning+losing, 3 trades, no-trade, open position excluded);
+      Guards (duplicate raises, close nonexistent raises, has_position lifecycle, reopen after close);
+      Slippage integration (fills worse than quoted, net_pnl lower, invariant holds with slippage,
+                           slippage estimate on ClosedTrade, costs computed on filled prices);
+      Interface swap (MockAlternativeEngine satisfies ABC; abstract not instantiable);
+      Dataclasses (is_paper=True default, ClosedTrade invariant prevents bad construction,
+                   unrealized_pnl LONG + SHORT)
 
 ### Remaining Phase 4
 - [ ] Stage-1 cheap screen (100 stocks, arithmetic only, ms-scale)
