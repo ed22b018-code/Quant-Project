@@ -179,6 +179,22 @@ model     = "fixed_bps"
 entry_bps = 2.0   # 2 bps = 0.02% at entry (conservative mid-cap NSE estimate)
 exit_bps  = 2.0   # 2 bps = 0.02% at exit
 
+# ── Allocator — position sizing and hard guardrails ───────────────────────────
+# Fractional Kelly + volatility scaling. Selection (scanner) and sizing (allocator)
+# are SEPARATE concerns — sizing logic must NOT influence scanner ranking.
+#
+# Sizing formula:
+#   kelly_f = after_cost_ev_pct / stop_loss_pct
+#   raw_pct = kelly_fraction × kelly_f × min(vol_target_pct / est_vol, max_vol_scalar)
+#
+# Why fractional (not full) Kelly: ML confidence is imperfect; full Kelly with an
+# overconfident model leads to ruin. Quarter-Kelly halves bet-sequence volatility
+# at the cost of ~13% lower long-run growth — acceptable for imperfect estimates.
+[trading.allocator]
+kelly_fraction = 0.25   # quarter-Kelly (conservative; change to 0.5 only with validated calibration)
+vol_target_pct = 1.0    # target daily volatility % for scaling
+max_vol_scalar = 2.0    # cap on vol scaling multiplier (prevents over-sizing low-vol stocks)
+
 # ── Scanner — candidate funnel ────────────────────────────────────────────────
 # Filters run cheapest first; only survivors reach the EV scoring stage.
 # Ranking is by AFTER-COST EXPECTED VALUE — NOT raw model confidence.

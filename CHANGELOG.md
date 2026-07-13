@@ -2,6 +2,73 @@
 
 ---
 
+## Checkpoint 5.2 — Capital Allocation + Guardrails (2026-07-14) ✅
+
+### New files
+- `src/trading/allocator.py` — `CapitalAllocator`, `AllocationInput`, `SizedOrder`, `RejectedCandidate`, `AllocationResult`
+- `tests/test_allocator.py` — 29 tests
+
+### Modified files
+- `src/config.py` — added `AllocatorConfig`; `TradingConfig.allocator: AllocatorConfig`
+- `config/config.toml` — added `[trading.allocator]` section
+
+### Architecture
+
+The allocator is the second half of the scanner → allocator pipeline. The scanner
+decides WHICH candidates to trade (by after-cost EV); the allocator decides HOW MUCH.
+These are strictly separate concerns — sizing logic must not leak into scanner ranking.
+
+**Fractional Kelly + volatility scaling:**
+
+```
+kelly_f  = after_cost_ev_pct / stop_loss_pct   (Kelly fraction: edge per unit risked)
+raw_pct  = kelly_fraction × kelly_f
+           × min(vol_target_pct / estimated_vol, max_vol_scalar)
+```
+
+`kelly_fraction = 0.25` (quarter-Kelly). Full Kelly maximises log-wealth but assumes
+perfect probability estimates. ML confidence is imperfect; full Kelly with an
+overconfident model leads to ruin. Quarter-Kelly roughly halves bet-sequence volatility
+at the cost of ~13% lower long-run growth — an acceptable trade-off.
+
+Volatility scaling: a lower-volatility stock gets a proportionally larger allocation
+(more room per unit of risk budget). Capped at `max_vol_scalar=2.0` to prevent
+over-sizing quiet stocks.
+
+Candidates are processed in ascending rank order (best after-cost EV first), so
+highest-quality candidates get capital before lower-quality ones hit any limit.
+
+**Four hard guardrails in fixed priority order:**
+
+1. `individual_cap` — position_value ≤ total × max_position_pct (10%)
+2. `sector_cap` — sector total ≤ total × max_sector_exposure_pct (25%)
+3. `exposure_cap` / `cash_reserve` — min(max_intraday_exposure_pct, 1−min_cash_reserve_pct)
+   is the binding ceiling; whichever guardrail has less room is applied and named
+
+All guardrails that fire are listed in `SizedOrder.guardrails_applied`. Nothing is
+silently swallowed — every breach is logged at WARNING level.
+
+**Float precision bug fixed:** `_apply_guardrails` uses Decimal arithmetic throughout
+for all comparisons. `float(Decimal("0.2"))` = `0.2000000000000000111...` in IEEE 754,
+so `0.25 − float(...)` ≈ `0.04999...` not `0.05000...`. At ₹1000/share this causes
+sector-available qty=24 instead of 25 (off by one share, ₹1,000 misallocation).
+Fix: keep all guardrail comparisons in Decimal, convert back to float only at return.
+
+### Test structural guarantees
+
+- `test_not_confidence_weight`: candidate B (conf=0.65) gets MORE capital than A (conf=0.80)
+  because B has better after-cost EV and lower volatility. Allocator is NOT confidence-weighted.
+- `test_sector_cap_enforced`: third BANK candidate gets exactly 5% (25%−20%) — Decimal
+  arithmetic proves the arithmetic is exact to the share level (qty=25, not 24).
+- Each guardrail has its own test proving it fires in isolation.
+
+### Test count — laptop (no duckdb)
+
+**169 / 169** portable tests passing (29 new allocator tests; all 29 green).
+The pre-existing duckdb import failures are unchanged.
+
+---
+
 ## Checkpoint 5.1 — Scanner: 100→10 Funnel (2026-07-14) ✅
 
 ### New files

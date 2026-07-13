@@ -515,13 +515,31 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
       ScannerConfig (5): loads from toml, defaults sane, zero size rejected, negative qty rejected,
                          negative confidence rejected
 
-### Checkpoint 5.2 — Capital Allocation + Guardrails (pending review of 5.1)
-- [ ] Sizing by fractional Kelly + vol scaling (NOT equal-weight, NOT confidence-weight)
-- [ ] Hard guardrails enforced in code (from config, not overridable at runtime):
-      max_position_pct=0.10, max_intraday_exposure_pct=0.40,
-      min_cash_reserve_pct=0.10, drawdown_pause_pct=0.20
-- [ ] Output feeds PaperExecutionEngine as sized orders
-- [ ] Selection and sizing strictly separated — sizing logic must NOT leak into scanner ranking
+### Checkpoint 5.2 — Capital Allocation + Guardrails (2026-07-14) ✅
+- [x] `src/trading/allocator.py` — `CapitalAllocator` (fractional Kelly + vol scaling);
+      `AllocationInput`, `SizedOrder`, `RejectedCandidate`, `AllocationResult`
+- [x] Sizing formula: `kelly_f = ev/stop; raw_pct = kelly_fraction × kelly_f × min(vol_target/vol, max_vol_scalar)`
+      Quarter-Kelly (0.25) default — full Kelly assumes perfect probability estimates (ML models aren't)
+- [x] Four hard guardrails in fixed priority order (non-overridable):
+      1. individual_cap (max_position_pct=10%) — no single trade > 10%
+      2. sector_cap (max_sector_exposure_pct=25%) — no sector > 25%
+      3. exposure_cap / cash_reserve (binding of max_intraday=40% and 1−min_cash=90%) — named separately
+- [x] All guardrails that fire are listed in `SizedOrder.guardrails_applied` — nothing silently swallowed
+- [x] Drawdown pause: `drawdown_paused=True` → zero orders, all inputs rejected with reason
+- [x] Decimal arithmetic throughout `_apply_guardrails` — eliminates float accumulation error
+      (float(Decimal("0.2")) = 0.2000000...011; 0.25 − 0.2000... ≈ 0.04999... → sector_available wrong by ε)
+- [x] Selection (scanner) and sizing (allocator) strictly separated — no sizing logic in scanner ranking
+- [x] Candidates processed in ascending rank order — best EV gets capital before limits hit lower-quality
+- [x] Output feeds `PaperExecutionEngine.place_order` — integration tested
+- [x] `src/config.py` — `AllocatorConfig` pydantic sub-model; `TradingConfig.allocator: AllocatorConfig`
+- [x] `config/config.toml [trading.allocator]` — kelly_fraction, vol_target_pct, max_vol_scalar
+- [x] `tests/test_allocator.py` — 29 tests across 5 groups:
+      Sizing (5): Kelly math exact, higher-EV/lower-vol → larger, NOT equal-weight, NOT confidence-weight, vol scaling;
+      Guardrails (8): each guardrail fires explicitly (individual_cap, exposure_cap, cash_reserve, sector_cap,
+                      all-guardrails-reported, no-guardrails-is-empty, breach-never-silently-allowed, drawdown-pause);
+      Empty/degenerate (4): empty input, all-rejected, qty=0, NO_TRADE direction;
+      Integration (3): orders feed paper engine, portfolio cash consistent, exposure consistent;
+      Config (9): loads from toml, defaults, validation rejects bad values
 
 ### Remaining Phase 4
 - [ ] Stage-2 full scoring (FinBERT + models + regime → top-10)

@@ -142,6 +142,40 @@ class ScannerConfig(BaseModel):
         return v
 
 
+class AllocatorConfig(BaseModel):
+    """Fractional Kelly + volatility-scaling parameters for position sizing.
+
+    Sizing formula:
+        kelly_f = after_cost_ev_pct / stop_loss_pct          (Kelly fraction)
+        raw_pct = kelly_fraction × kelly_f                    (fractional Kelly)
+                  × min(vol_target_pct / estimated_vol, max_vol_scalar)  (vol scaling)
+
+    Why fractional (not full) Kelly:
+        Full Kelly maximises long-run log-wealth but assumes perfect probability estimates.
+        ML model confidence is imperfect; full Kelly with an overconfident model leads to ruin.
+        Quarter-Kelly (0.25) roughly halves the bet-sequence volatility at the cost of
+        ~13% lower long-run growth rate — an acceptable trade-off for imperfect estimates.
+    """
+
+    kelly_fraction: float = 0.25    # fractional Kelly multiplier (0 < f ≤ 1)
+    vol_target_pct: float = 1.0     # target daily volatility % for scaling
+    max_vol_scalar: float = 2.0     # cap on vol scaling multiplier
+
+    @field_validator("kelly_fraction")
+    @classmethod
+    def _valid_kelly(cls, v: float) -> float:
+        if not (0 < v <= 1):
+            raise ValueError(f"kelly_fraction must be in (0, 1], got {v}")
+        return v
+
+    @field_validator("vol_target_pct", "max_vol_scalar")
+    @classmethod
+    def _positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError(f"Must be > 0, got {v}")
+        return v
+
+
 class TradingConfig(BaseModel):
     token_pool: int
     primary_horizon_min: int
@@ -158,6 +192,7 @@ class TradingConfig(BaseModel):
     costs: CostConfig
     slippage: SlippageConfig
     scanner: ScannerConfig
+    allocator: AllocatorConfig
 
     @model_validator(mode="after")
     def _primary_in_all_horizons(self) -> "TradingConfig":
