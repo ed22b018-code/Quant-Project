@@ -14,9 +14,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal
 
-Direction = Literal["LONG", "SHORT"]
+from src.trading._types import Direction
 
 
 @dataclass(frozen=True)
@@ -73,9 +72,32 @@ class SlippageModel(ABC):
         entry_quoted: Decimal,
         exit_quoted: Decimal,
     ) -> SlippageEstimate:
-        """Estimate round-trip slippage from quoted prices."""
+        """Estimate round-trip slippage from quoted prices (calls the model for fills)."""
         entry_filled = self.apply_entry(direction, entry_quoted)
         exit_filled = self.apply_exit(direction, exit_quoted)
+        return self.estimate_from_fills(
+            qty=qty,
+            entry_quoted=entry_quoted,
+            entry_filled=entry_filled,
+            exit_quoted=exit_quoted,
+            exit_filled=exit_filled,
+        )
+
+    def estimate_from_fills(
+        self,
+        qty: int,
+        entry_quoted: Decimal,
+        entry_filled: Decimal,
+        exit_quoted: Decimal,
+        exit_filled: Decimal,
+    ) -> SlippageEstimate:
+        """Build a SlippageEstimate from already-computed fill prices.
+
+        Use this when fill prices have already been determined (e.g., via
+        apply_entry / apply_exit) to avoid calling the model a second time.
+        Guarantees the stored estimate is consistent with the fills actually
+        used in cost computation, even for stateful or non-deterministic models.
+        """
         qty_d = Decimal(qty)
         entry_cost = abs(entry_filled - entry_quoted) * qty_d
         exit_cost = abs(exit_filled - exit_quoted) * qty_d

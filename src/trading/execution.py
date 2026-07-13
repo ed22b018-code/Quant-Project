@@ -15,16 +15,14 @@ Portfolio invariant (maintained continuously):
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Literal
 
-from src.trading.costs import CostSimulator
+from src.trading._types import Direction
+from src.trading.costs import CostSimulator, TradeResult
 from src.trading.slippage import SlippageEstimate, SlippageModel
-
-Direction = Literal["LONG", "SHORT"]
 
 
 class ExitReason(Enum):
@@ -58,15 +56,15 @@ class ClosedTrade:
     exit_quoted_price: Decimal
     exit_filled_price: Decimal
     exit_reason: ExitReason
-    trade_result: object          # TradeResult — avoid circular import hint
+    trade_result: TradeResult
     slippage: SlippageEstimate
     net_pnl: Decimal
 
     def __post_init__(self) -> None:
-        if self.net_pnl != self.trade_result.net_pnl:  # type: ignore[union-attr]
+        if self.net_pnl != self.trade_result.net_pnl:
             raise ValueError(
                 f"Invariant violation: ClosedTrade.net_pnl={self.net_pnl} "
-                f"!= trade_result.net_pnl={self.trade_result.net_pnl}"  # type: ignore[union-attr]
+                f"!= trade_result.net_pnl={self.trade_result.net_pnl}"
             )
 
 
@@ -210,11 +208,14 @@ class PaperExecutionEngine(ExecutionEngine):
             exit_price=exit_filled,
         )
 
-        slippage_est = self._slippage.estimate(
-            direction=pos.direction,
+        # Build estimate from the fills already computed above — never call
+        # apply_exit() a second time, which would break stateful/stochastic models.
+        slippage_est = self._slippage.estimate_from_fills(
             qty=pos.qty,
             entry_quoted=pos.entry_fill.quoted_price,
+            entry_filled=entry_filled,
             exit_quoted=exit_price,
+            exit_filled=exit_filled,
         )
 
         # Cash accounting on exit

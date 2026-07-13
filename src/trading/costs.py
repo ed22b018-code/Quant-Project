@@ -7,7 +7,7 @@ Covers the full realistic cost stack, computed per-leg correctly:
   Brokerage            buy + sell     min(0.03% × turnover, ₹20) each
   STT                  sell only      0.025% of sell-leg turnover
   Exchange charges     buy + sell     0.00297% of each leg's turnover
-  SEBI fees            total turnover 0.001% of (buy + sell) turnover
+  SEBI fees            total turnover 0.0001% of (buy + sell) turnover
   GST                  derived        18% on (brokerage + exchange + SEBI)
   Stamp duty           buy only       0.003% of buy-leg turnover
 
@@ -29,11 +29,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal
 
 from src.config import CostConfig
-
-Direction = Literal["LONG", "SHORT"]
+from src.trading._types import Direction
 
 # Tolerance for the __post_init__ net_pnl invariant check (sub-paise).
 _NET_PNL_TOLERANCE = Decimal("0.001")

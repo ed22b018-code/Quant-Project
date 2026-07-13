@@ -474,6 +474,16 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
       Dataclasses (is_paper=True default, ClosedTrade invariant prevents bad construction,
                    unrealized_pnl LONG + SHORT)
 
+### Checkpoint 4.4 — Position-Sizing Guardrails (DEFERRED — required before live scanner)
+- [ ] **Enforce DESIGN.md §12 limits inside PaperExecutionEngine** (or the scanner layer
+      that calls it). Currently documented in config but not enforced:
+      `max_position_pct = 0.10` (max 10% of pool per trade),
+      `max_intraday_exposure_pct = 0.40` (max 40% total intraday),
+      `min_cash_reserve_pct = 0.10` (always keep ≥ 10% cash),
+      `drawdown_pause_pct = 0.20` (pause new entries if pool drops 20% from peak).
+      Decision: wire guardrails at the scanner/allocation layer (Phase 4 stage-1 screen),
+      not inside the engine itself — engine stays a neutral executor, caller enforces limits.
+
 ### Remaining Phase 4
 - [ ] Stage-1 cheap screen (100 stocks, arithmetic only, ms-scale)
 - [ ] Stage-2 full scoring (FinBERT + models + regime → top-10)

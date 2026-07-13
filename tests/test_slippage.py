@@ -183,6 +183,70 @@ class TestSlippageEstimate:
 
 # ── ABC compliance ─────────────────────────────────────────────────────────────
 
+# ── estimate_from_fills ───────────────────────────────────────────────────────
+
+class TestEstimateFromFills:
+    """estimate_from_fills must use provided fills, not recompute them."""
+
+    def test_matches_estimate_when_using_model_fills(self):
+        """estimate_from_fills with model fills equals estimate()."""
+        model = FixedBpsSlippage(entry_bps=2.0, exit_bps=3.0)
+        entry_q, exit_q = Decimal("2500"), Decimal("2520")
+        entry_f = model.apply_entry("LONG", entry_q)
+        exit_f = model.apply_exit("LONG", exit_q)
+
+        est_fills = model.estimate_from_fills(
+            qty=100,
+            entry_quoted=entry_q,
+            entry_filled=entry_f,
+            exit_quoted=exit_q,
+            exit_filled=exit_f,
+        )
+        est_quoted = model.estimate("LONG", 100, entry_q, exit_q)
+        assert est_fills == est_quoted
+
+    def test_uses_provided_fills_verbatim(self):
+        """Custom fills are stored as-is — the model is not consulted."""
+        model = FixedBpsSlippage(entry_bps=2.0, exit_bps=2.0)
+        custom_entry = Decimal("2510")   # worse than 2bps would give
+        custom_exit = Decimal("2510")
+        est = model.estimate_from_fills(
+            qty=100,
+            entry_quoted=Decimal("2500"),
+            entry_filled=custom_entry,
+            exit_quoted=Decimal("2520"),
+            exit_filled=custom_exit,
+        )
+        assert est.entry_filled == custom_entry
+        assert est.exit_filled == custom_exit
+        # entry_cost = (2510 - 2500) * 100 = 1000
+        assert est.entry_cost == Decimal("1000")
+        # exit_cost = (2520 - 2510) * 100 = 1000
+        assert est.exit_cost == Decimal("1000")
+        assert est.total_cost == Decimal("2000")
+
+    def test_is_estimate_always_true_from_fills(self):
+        model = FixedBpsSlippage(entry_bps=2.0, exit_bps=2.0)
+        est = model.estimate_from_fills(
+            qty=10,
+            entry_quoted=Decimal("100"),
+            entry_filled=Decimal("100.2"),
+            exit_quoted=Decimal("105"),
+            exit_filled=Decimal("104.79"),
+        )
+        assert est.is_estimate is True
+
+    def test_model_name_propagated_from_fills(self):
+        model = FixedBpsSlippage(entry_bps=1.0, exit_bps=1.0)
+        est = model.estimate_from_fills(
+            qty=1, entry_quoted=Decimal("100"), entry_filled=Decimal("100"),
+            exit_quoted=Decimal("100"), exit_filled=Decimal("100"),
+        )
+        assert est.model_name == "fixed_bps"
+
+
+# ── ABC compliance ─────────────────────────────────────────────────────────────
+
 class TestSlippageModelABC:
     def test_cannot_instantiate_abstract_base(self):
         with pytest.raises(TypeError):

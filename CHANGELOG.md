@@ -2,6 +2,53 @@
 
 ---
 
+## Audit fixes — Phase 4 hardening (2026-07-14) ✅
+
+Five findings from the post-build audit, all fixed. No behaviour changes for
+`FixedBpsSlippage`; the `estimate_from_fills` refactor only matters for future
+stateful / non-deterministic models.
+
+### Fixes
+
+| # | Finding | File(s) |
+|---|---|---|
+| 1 | SEBI fee comment "0.001%" wrong by 10× (code value 0.000001 = 0.0001%) | `config.toml`, `costs.py` docstring |
+| 2 | Exchange charges comment updated: rate verified post Oct 2024 reform; source cited | `config.toml` |
+| 3 | Double `apply_exit()` call: added `estimate_from_fills()` to `SlippageModel`; engine uses it | `slippage.py`, `execution.py` |
+| 4 | `ClosedTrade.trade_result: object` → `TradeResult`; removed two `# type: ignore` | `execution.py` |
+| 5 | Unused `field` import removed; `Direction` consolidated to `_types.py` | `execution.py`, all three trading modules |
+
+### Rate verification results (Priority 1 from audit)
+
+| Rate | Config value | Status | Source |
+|---|---|---|---|
+| STT intraday sell | 0.025% (`0.00025`) | ✅ Confirmed — Finance Act 2024 raised F&O only; cash market unchanged | Finance Act 2024, Schedule STT |
+| Exchange charges | ₹2.97/lakh per side (`0.0000297`) | ✅ Verified — post SEBI flat-fee reform Oct 2024; pre-reform was ₹3.25/lakh | NSE fee circular Oct 2024; broker fee schedules 2026-07-14 |
+| SEBI fees | ₹10/crore = 0.0001% (`0.000001`) | ✅ Code correct; COMMENT was wrong ("0.001%" → fixed to "0.0001%") | SEBI circular |
+| GST base includes SEBI fees | `gst_base = brok + exch + sebi` | ✅ Already correct — SEBI fees became subject to 18% GST from April 2025 | GST Act; SEBI fee treatment confirmed 2026-07-14 |
+| GST rate | 18% | ✅ Unchanged | GST Act India |
+| Stamp duty | 0.003% buy leg | ✅ Unchanged | Indian Stamp Act 2019 |
+
+### New `estimate_from_fills()` method
+
+`SlippageModel.estimate_from_fills(qty, entry_quoted, entry_filled, exit_quoted, exit_filled)`
+builds a `SlippageEstimate` from already-computed fills without calling the model again.
+`PaperExecutionEngine.close_position()` now uses this after computing fills, so:
+- `apply_exit()` is called exactly once per close (verified by `test_slippage_applied_once_per_leg_not_twice`)
+- `SlippageEstimate.exit_filled` always equals `ClosedTrade.exit_filled_price`
+- Future stateful or noisy slippage models will work correctly
+
+### Test count — honest accounting
+
+On the **RTX 3060** (duckdb installed): **608 / 608 passing** (was 603; +5 new).
+
+On **this laptop** (duckdb not installed): **298 passing, 10 failing, 6 skipping** of
+309 collectable tests. The 10 failures are all `ModuleNotFoundError: No module named 'duckdb'`
+in `test_models.py` (2) and `test_orchestration.py` (8) — pre-existing environment gap,
+not code regressions. All 5 new tests added here pass on both machines.
+
+---
+
 ## Checkpoint 4.2 + 4.3 — Slippage Model + Paper Execution Engine (2026-07-14) ✅
 
 **Slippage as a swappable ABC, paper engine with full cash accounting, and 50 new tests.**
@@ -57,7 +104,7 @@ entry_bps = 2.0   # 2 bps = 0.02% at entry (conservative NSE mid-cap estimate)
 exit_bps  = 2.0   # 2 bps = 0.02% at exit
 ```
 
-### Test count: 603 / 603 passing (+50 new: 21 slippage + 29 execution)
+### Test count: 603 / 603 passing on RTX 3060 (+50 new: 21 slippage + 29 execution)
 
 ---
 

@@ -18,7 +18,7 @@ from decimal import Decimal
 
 from src.config import load_config
 from src.trading.costs import CostSimulator
-from src.trading.slippage import FixedBpsSlippage
+from src.trading.slippage import FixedBpsSlippage, SlippageModel
 from src.trading.execution import (
     ClosedTrade,
     ExecutionEngine,
@@ -251,6 +251,51 @@ class TestSlippageIntegration:
         assert closed.slippage.is_estimate is True
         assert closed.slippage.total_cost > Decimal("0")
         assert closed.slippage.model_name == "fixed_bps"
+
+    def test_slippage_applied_once_per_leg_not_twice(self):
+        """Engine calls apply_exit() once; estimate uses that fill, not a second call.
+
+        A counting SlippageModel returns different values on each apply_exit() call.
+        With estimate_from_fills(), the stored SlippageEstimate.exit_filled and the
+        actual exit_filled_price used in cost computation must always agree — even if
+        repeated calls to apply_exit() would produce different results.
+        """
+        class _CountingExitSlippage(SlippageModel):
+            def __init__(self) -> None:
+                self.exit_call_count = 0
+
+            @property
+            def model_name(self) -> str:
+                return "counting_test"
+
+            def apply_entry(self, direction, price):
+                return price  # no entry slippage
+
+            def apply_exit(self, direction, price):
+                self.exit_call_count += 1
+                # 1st call: 2 bps; 2nd call: 50 bps — obviously inconsistent
+                bps = Decimal("2") if self.exit_call_count == 1 else Decimal("50")
+                if direction == "LONG":
+                    return price * (Decimal("1") - bps / Decimal("10000"))
+                return price * (Decimal("1") + bps / Decimal("10000"))
+
+        counting = _CountingExitSlippage()
+        cfg = load_config().trading.costs
+        engine = PaperExecutionEngine(Decimal("500000"), CostSimulator(cfg), counting)
+
+        engine.place_order("RELIANCE", 100, "LONG", Decimal("2500"), T0)
+        closed = engine.close_position("RELIANCE", Decimal("2520"), ExitReason.TARGET_HIT, T1)
+
+        # apply_exit must have been called exactly once
+        assert counting.exit_call_count == 1, (
+            f"apply_exit called {counting.exit_call_count} times; should be 1"
+        )
+        # Stored estimate fill must match the actual fill used for cost computation
+        assert closed.slippage.exit_filled == closed.exit_filled_price, (
+            "SlippageEstimate.exit_filled diverged from the fill used in CostSimulator"
+        )
+        # Costs were computed on the actual fill (first call = 2 bps)
+        assert closed.trade_result.exit_price == closed.exit_filled_price
 
     def test_round_trip_with_slippage_costs_computed_on_filled_prices(self):
         """CostSimulator receives slippage-adjusted prices, not quoted prices."""

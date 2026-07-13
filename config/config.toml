@@ -141,21 +141,29 @@ brokerage_flat_cap = 20.0      # ₹20 cap per order (intraday MIS)
 
 # Securities Transaction Tax — intraday equity.
 # Applied on the SELL leg only (both LONG exits and SHORT entries).
-# Source: Finance Act 2024, Schedule STT; as-of 2024-07-01.
+# Finance Act 2024 (effective 2024-07-23) raised STT on F&O only; equity cash
+# intraday rate confirmed unchanged at 0.025% on sell side.
+# Source: Finance Act 2024, Schedule STT; verified 2026-07-14.
 stt_intraday_sell_pct = 0.00025    # 0.025% of sell-leg turnover
 
 # NSE equity cash segment transaction charges.
-# Applied per side (buy AND sell independently), then summed.
-# Source: NSE fee schedule FY 2024-25; as-of 2024-07-01.
-exchange_charges_pct = 0.0000297   # ₹2.97 per lakh of turnover per side
+# Applied per side (buy AND sell independently); code applies to total turnover,
+# which is mathematically equivalent (rate × buy + rate × sell = rate × total).
+# ₹2.97 per lakh per side — post SEBI flat-fee reform effective Oct 2024.
+# Source: NSE fee circular (SEBI reform Oct 2024); verified against broker fee
+# schedules (Zerodha, Groww) 2026-07-14. Pre-reform was ₹3.25/lakh.
+exchange_charges_pct = 0.0000297   # ₹2.97 per lakh of turnover per side (= 0.00297%)
 
 # SEBI turnover fees — applied on total (buy + sell) turnover.
-# Source: SEBI circular SEBI/HO/MRD/2023; as-of 2024-07-01.
-sebi_fees_pct = 0.000001           # ₹10 per crore (= ₹0.10 per lakh = 0.001%)
+# SEBI fees became subject to 18% GST from April 2025; they are correctly included
+# in gst_base = brokerage + exchange + sebi_fees — no code change needed.
+# Source: SEBI circular; ₹10/crore rate unchanged; GST treatment verified 2026-07-14.
+sebi_fees_pct = 0.000001           # ₹10 per crore (= ₹0.10 per lakh = 0.0001%)
 
 # GST on (brokerage + exchange charges + SEBI fees).
+# SEBI fees included from April 2025 (government levy, previously exempt).
 # NOT applied on STT or stamp duty (those are separate statutory levies).
-# Source: GST Act India, standard rate; as-of 2024-07-01.
+# Source: GST Act India, standard rate; SEBI fee treatment confirmed 2026-07-14.
 gst_pct = 0.18                     # 18%
 
 # Stamp duty — applied on the BUY leg only.
