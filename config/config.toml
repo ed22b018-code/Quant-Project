@@ -179,6 +179,21 @@ model     = "fixed_bps"
 entry_bps = 2.0   # 2 bps = 0.02% at entry (conservative mid-cap NSE estimate)
 exit_bps  = 2.0   # 2 bps = 0.02% at exit
 
+# ── Scanner — candidate funnel ────────────────────────────────────────────────
+# Filters run cheapest first; only survivors reach the EV scoring stage.
+# Ranking is by AFTER-COST EXPECTED VALUE — NOT raw model confidence.
+# A high-confidence tiny-move candidate that costs more than it makes must rank
+# BELOW a moderate-confidence larger-move candidate that nets positive after costs.
+[trading.scanner]
+max_shortlist_size        = 10     # top N candidates to surface each scan
+min_confidence            = 0.55   # model confidence floor: P(direction correct)
+min_expected_move_pct     = 0.10   # minimum predicted price move (%) to even score
+min_avg_daily_volume_cr   = 1.0    # liquidity gate: min ₹1cr average daily value
+min_volume_ratio          = 0.30   # activity gate: today's vol / 20-day average
+representative_qty        = 50     # shares used for round-trip cost estimation
+                                   # (cost_pct at ₹1000/share ≈ 0.106%; lower for
+                                   #  expensive stocks once brokerage cap kicks in)
+
 # ── Model / ML ────────────────────────────────────────────────────────────────
 [model]
 random_seed = 42   # fixed for reproducibility (DESIGN.md rule 5)

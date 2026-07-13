@@ -2,6 +2,62 @@
 
 ---
 
+## Checkpoint 5.1 — Scanner: 100→10 Funnel (2026-07-14) ✅
+
+### New files
+- `src/trading/scanner.py` — two-stage candidate funnel
+- `tests/test_scanner.py` — 33 tests
+
+### Modified files
+- `src/trading/_types.py` — added `PredictionDirection`
+- `src/config.py` — added `ScannerConfig`; `TradingConfig.scanner: ScannerConfig`
+- `config/config.toml` — added `[trading.scanner]` section
+
+### Architecture
+
+The scanner is the connective tissue between model predictions and the execution
+engine. It answers: "given 100 universe symbols with predictions, which ≤10 are
+actually worth trading today?"
+
+**Two-stage funnel:**
+
+Stage 1 (cheap, O(n), no CostSimulator): eliminates obvious non-candidates on
+direction (NO_TRADE filtered immediately), model confidence floor, liquidity
+(avg daily traded value in crores), volume activity ratio, and minimum expected move.
+
+Stage 2 (scored, O(survivors)): computes after-cost expected value for each
+survivor using `CostSimulator` and ranks descending. Only candidates with EV > 0
+reach the shortlist.
+
+**Ranking by after-cost EV — the structural guarantee:**
+
+After-cost EV = `confidence × expected_move_pct − (1−confidence) × stop_loss_pct − cost_pct`
+
+Ranking by raw model confidence is a structural mistake. The scanner explicitly
+avoids it: a candidate with confidence=0.90 and a 0.05% predicted move has
+*negative* after-cost EV at typical NSE transaction costs, and must be excluded —
+even though it looks "most confident". A candidate with confidence=0.65 and a 0.80%
+move will net positive after costs and should rank #1. This is tested explicitly:
+`test_high_confidence_tiny_move_loses_to_lower_confidence_big_move`.
+
+Cost estimation uses `CostSimulator.compute()` with the actual `entry_price` from
+each prediction and `representative_qty` from config (default 50 shares). Setting
+`exit_price = entry_price` (zero gross move) isolates cost only. At ₹1000/share
+with qty=50: position = ₹50,000; total cost ≈ ₹53.02 → cost_pct ≈ 0.106%. This
+cost_pct is lower for expensive stocks once brokerage caps at ₹20/leg.
+
+**Empty shortlist is valid.** When no candidate has positive after-cost EV,
+`ScanOutput.has_candidates` is `False` and `shortlist` is empty. Not-trading is
+a signal, not an error.
+
+### Test count — laptop (no duckdb)
+
+**331 / 342 collectable** (+33 new scanner tests; all 33 pass on both machines).
+The 10 pre-existing failures remain `ModuleNotFoundError: duckdb` in test_models.py
+and test_orchestration.py — unchanged.
+
+---
+
 ## Audit fixes — Phase 4 hardening (2026-07-14) ✅
 
 Five findings from the post-build audit, all fixed. No behaviour changes for

@@ -484,13 +484,50 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
       Decision: wire guardrails at the scanner/allocation layer (Phase 4 stage-1 screen),
       not inside the engine itself — engine stays a neutral executor, caller enforces limits.
 
+### Checkpoint 5.1 — Scanner: 100→10 Funnel (2026-07-14) ✅
+- [x] `src/trading/scanner.py` — `PredictionInput` (clean model interface, mock-compatible);
+      `ScanResult` (rank, after_cost_ev_pct, gross_ev_pct, estimated_cost_pct, reasoning);
+      `FilteredOut` (symbol, direction, reason); `ScanOutput` (shortlist, filtered_out, scanned_at,
+      has_candidates, best); `Scanner` (two-stage funnel)
+- [x] Stage 1 (cheap, no CostSimulator): direction (NO_TRADE out), confidence floor,
+      liquidity floor (avg_daily_volume_cr), volume-activity ratio, minimum expected move
+- [x] Stage 2 (scored): after-cost EV = confidence × move − (1−confidence) × stop − cost_pct;
+      cost_pct estimated via CostSimulator with representative_qty at actual entry_price;
+      only candidates with EV > 0 make shortlist; sorted descending by after-cost EV
+- [x] **Ranking by AFTER-COST EV, NOT raw confidence** — structural choice; tested explicitly:
+      a candidate with confidence=0.90 and tiny move (negative after-cost EV) must rank BELOW
+      a candidate with confidence=0.65 and large move (positive after-cost EV), and must be excluded
+- [x] Empty shortlist = valid first-class outcome (not-trading is a signal, not an error)
+- [x] `src/config.py` — `ScannerConfig` pydantic sub-model; `TradingConfig.scanner: ScannerConfig`
+- [x] `config/config.toml [trading.scanner]` — 6 parameters with structural-choice comment
+- [x] `src/trading/_types.py` — `PredictionDirection = Literal["LONG", "SHORT", "NO_TRADE"]`
+- [x] `tests/test_scanner.py` — 33 tests across 6 groups:
+      Pre-filters (8): NO_TRADE, low confidence, threshold boundary, low liquidity, low volume
+                       ratio, low move, all-pass reaches EV stage, SHORT passes direction filter;
+      Ranking by after-cost EV (5): THE KEY TEST (high-conf low-move excluded; lower-conf
+                                    high-move ranks #1); all shortlisted have EV>0; sorted desc;
+                                    SHORT direction; EV breakdown fields consistent;
+      Empty shortlist (4): all negative EV, all NO_TRADE, empty input, has_candidates=True;
+      Shortlist size limit (3): capped, fewer-than-max, best candidates retained when capped;
+      ScanOutput structure (7): filtered_out completeness, reasons non-empty, sequential ranks,
+                                reasoning non-empty, scanned_at propagated, defaults to now,
+                                shortlisted symbol absent from filtered_out;
+      ScannerConfig (5): loads from toml, defaults sane, zero size rejected, negative qty rejected,
+                         negative confidence rejected
+
+### Checkpoint 5.2 — Capital Allocation + Guardrails (pending review of 5.1)
+- [ ] Sizing by fractional Kelly + vol scaling (NOT equal-weight, NOT confidence-weight)
+- [ ] Hard guardrails enforced in code (from config, not overridable at runtime):
+      max_position_pct=0.10, max_intraday_exposure_pct=0.40,
+      min_cash_reserve_pct=0.10, drawdown_pause_pct=0.20
+- [ ] Output feeds PaperExecutionEngine as sized orders
+- [ ] Selection and sizing strictly separated — sizing logic must NOT leak into scanner ranking
+
 ### Remaining Phase 4
-- [ ] Stage-1 cheap screen (100 stocks, arithmetic only, ms-scale)
 - [ ] Stage-2 full scoring (FinBERT + models + regime → top-10)
 - [ ] Selection-bias guard (higher confidence bar for cherry-picked top-10)
 - [ ] Regime classifier (risk-on / neutral / risk-off)
 - [ ] Regime throttle on confidence + sizing
-- [ ] Hard guardrails (DESIGN.md §12, cannot be overridden)
 - [ ] Meta-label sizing model (fractional Kelly / vol-target)
 - [ ] Two-tier monitor (watchlist + open-position low-latency loop)
 - [ ] Event-priority + idempotency

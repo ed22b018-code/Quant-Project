@@ -108,6 +108,40 @@ class SlippageConfig(BaseModel):
         return v
 
 
+class ScannerConfig(BaseModel):
+    """Parameters for the two-stage candidate funnel (scanner.py).
+
+    Filters run cheapest first; only survivors reach the EV scoring stage.
+    Ranking is by AFTER-COST EXPECTED VALUE — not raw model confidence.
+    """
+
+    max_shortlist_size: int = 10         # top N ranked candidates
+    min_confidence: float = 0.55         # model confidence floor
+    min_expected_move_pct: float = 0.10  # minimum predicted move (%) to score
+    min_avg_daily_volume_cr: float = 1.0 # liquidity floor in crores daily
+    min_volume_ratio: float = 0.30       # today's vol / 20-day avg
+    representative_qty: int = 50         # shares used for round-trip cost estimation
+
+    @field_validator("max_shortlist_size", "representative_qty")
+    @classmethod
+    def _positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"Must be > 0, got {v}")
+        return v
+
+    @field_validator(
+        "min_confidence",
+        "min_expected_move_pct",
+        "min_avg_daily_volume_cr",
+        "min_volume_ratio",
+    )
+    @classmethod
+    def _non_negative(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError(f"Must be >= 0, got {v}")
+        return v
+
+
 class TradingConfig(BaseModel):
     token_pool: int
     primary_horizon_min: int
@@ -123,6 +157,7 @@ class TradingConfig(BaseModel):
     max_sector_exposure_pct: float
     costs: CostConfig
     slippage: SlippageConfig
+    scanner: ScannerConfig
 
     @model_validator(mode="after")
     def _primary_in_all_horizons(self) -> "TradingConfig":
