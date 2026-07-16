@@ -1035,7 +1035,7 @@ class DhanBulkDownloader:
             for candidate in strikes:
                 pain = 0.0
                 for _, row in grp.iterrows():
-                    oi_val = float(row["oi"] or 0)
+                    oi_val = 0.0 if pd.isna(row["oi"]) else float(row["oi"])
                     s = float(row["strike_price"])
                     if row["option_type"] == "CE":
                         pain += max(0.0, candidate - s) * oi_val

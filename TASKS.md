@@ -541,6 +541,151 @@ Built against mocks; real API runs tomorrow. All 32 new tests pass.
       Integration (3): orders feed paper engine, portfolio cash consistent, exposure consistent;
       Config (9): loads from toml, defaults, validation rejects bad values
 
+### Checkpoint 6 — Full Training + Honest Evaluation (2026-07-15) ✅
+
+**PRICE/VOLUME-ONLY baseline model. F&O and sentiment features are all-zero.**
+
+- [x] **Pipeline bugs fixed** (found during test run):
+      1. Missing `AND timeframe='1'` filter → 3× dataset duplication (1/5/15-min bars all match
+         9:30 IST open; mixed-timeframe labels corrupt the dataset). Fixed in `_build_for_symbol_worker`.
+      2. `dropna(subset=feature_cols + ["label"])` with all-zero F&O features (empty `fo_daily_metrics`)
+         → every row dropped → no training data. Fixed: `df[df["label"].notna()].copy()` then
+         `fillna(0.0)` on feature columns.
+- [x] **Progress logging** added to `training_pipeline.py`: per-symbol counter (N/109, %, timestamp,
+      elapsed, ETA), stage banners (STAGE 1/4 … DONE), stdout `flush=True` on all print() calls
+      (Python blocks stdout when redirected to file without this).
+- [x] **Full training run**: `scripts/run_full_training.py` — 109 symbols, 2023-07-05 to 2026-07-03,
+      6-thread CPU cap (75% of 8 cores). Total time: **64m 23s**.
+      Dataset: **85,347 rows × 26 columns**. Walk-forward: **5 folds** with purge+embargo.
+      Test set sealed: **8,534 rows** (touched once). Calibrated: **isotonic regression** on 12,038 val samples.
+- [x] **Model type stamped** in `models/v1_full/provenance.json`:
+      `model_type: "PRICE_VOLUME_ONLY"` + `feature_honesty` dict (ALL_ZERO for F&O/sentiment).
+- [x] **Evaluation** (`scripts/run_evaluation_v2.py`) on sealed test set (78 days, 2026-03-18 to 2026-07-03):
+
+  **Calibration:**
+  - BEARISH: well-calibrated 0.15–0.55 range (gap < 0.013); degrades at >0.65 (high-confidence regime sparse)
+  - NO_TRADE: well-calibrated throughout (max gap 0.114); Brier 0.2208
+  - BULLISH: overconfident above 0.15 (only 556/7714 test rows are bullish; sparse class); Brier 0.0678
+
+  **After-cost backtest (real NSE cost stack + 4 bps round-trip slippage):**
+  - 1,361 trades taken (17% of bars — selectively bearish)
+  - Gross P&L: **+Rs 285,176 (+57.04%)** | Cost drag: Rs 96,868 (19.37%) | **Net P&L: +Rs 188,308 (+37.66%) ← HEADLINE**
+  - Profit bar hit: 49.7% | Stop hit: 13.2% | Time bar (flat): 37.1%
+
+  **Benchmark comparison:**
+  - Model (net):        +37.66% — **HEADLINE**
+  - Buy-and-hold:       +6.12%
+  - Random entry:       −0.67%
+  - Always-flat:        0.00%
+
+  **Per-month:** Mar +9.3%, Apr +14.8%, May +9.2%, Jun +3.4%, Jul (partial) +1.0%
+
+  **Feature importance (gain):** atr_20d (30k), intraday_momentum (12k), vwap_deviation (10k),
+  return_1d (8.9k), volume_ratio_20d (6.8k). All F&O/sentiment features: zero importance ✓
+
+  **Verdict (ORIGINAL — WRONG due to exit-price bug):** POTENTIAL EDGE (+37.66%).
+  See Checkpoint 6.1 below for the corrected result.
+
+- [x] **Bug fixed in evaluation**: `EXTRACT(HOUR FROM ts) = 4` returned 0 rows — DB stores IST timestamps
+      (`9:30:00 IST+5:30`, not `04:00:00 UTC`). Fixed to `HOUR=9, MINUTE=30` in both entry-price query
+      and buy-and-hold benchmark query.
+- [x] Model files saved: `models/v1_full/` (scenario_classifier/, provenance.json)
+- [ ] **Deferred to 3060**: Re-download CHOLAFIN/LTIM/MCDOWELL-N/TATAMOTORS/ZOMATO + re-train on ~114-symbol universe
+
+### Checkpoint 7.1 — F&O OI Historical Download (2026-07-16) ✅
+
+**Goal:** Populate `fo_daily_metrics` with real ATM CE/PE OI data (3-yr depth) so F&O features
+(`pcr_oi`, `pcr_volume`, `net_oi_change`) are non-zero for Checkpoint 7.2 retraining.
+
+- [x] **46-day chunk limit**: Dhan rollingoption rejects spans ≥47 days. `CHUNK_DAYS=45` confirmed safe.
+      Initial 90-day assumption was wrong; limit discovered empirically.
+- [x] **FUTSTK secId prefix fix**: instrument master stores `RELIANCE-Jul2026-FUT`, not `RELIANCE`.
+      `_get_secid()` changed to `LIKE 'RELIANCE-%'` — all 101 active-future symbols found.
+- [x] **3-key parallelism**: burst test confirmed per-key (not per-account) limits.
+      3 workers × 0.5s/key gap → ~2.77 jobs/sec vs 0.67/sec single-key.
+- [x] **Sentinel storage**: ATM CE/PE OI in `fo_history` with `expiry_date='2099-01-01'`, `strike_price=0.0`.
+- [x] **NA bug fixed** (`dhan_downloader.py:1038`): `row["oi"] or 0` → `TypeError` on `pd.NA`;
+      fixed to `0.0 if pd.isna(row["oi"]) else float(row["oi"])`.
+- [x] **sys.path fix** (`run_fo_oi_download.py`): project root inserted at startup so `src.*` imports
+      resolve when script is launched via `Start-Process python script.py` (not as a module).
+- [x] **Final coverage** (2026-07-16 20:56 IST):
+
+  | Timeframe    | Done  | Partial | Failed | Total | Coverage |
+  |---|---|---|---|---|---|
+  | FO_CE_ATM    | 2,496 |     229 |      0 | 2,725 |      92% |
+  | FO_PE_ATM    | 2,521 |     204 |      0 | 2,725 |      93% |
+  | FO_FUT_HIST  | 2,477 |       0 |    248 | 2,725 |      91% |
+  | FO_FUT_1M    |   300 |   3,437 |    296 | 4,033 |       7% |
+
+  `fo_history` rows: 212,539 | `fo_daily_metrics` rows: 69,196 | `fo_futures_oi_minute` rows: 1,201,891
+
+- [x] **Feature impact**:
+      `pcr_oi`, `pcr_volume`, `net_oi_change` — 3-yr depth ✓
+      `spot_futures_basis` — ~3-month depth (active contracts only — no expired contract OI)
+      `max_pain_distance` — NULL (ATM-only data; no per-strike OI breakdown)
+
+### Checkpoint 7.2 — Retrain WITH F&O Features (✅ DONE — 2026-07-17 — NO EDGE)
+
+**Verdict: F&O OI does NOT add edge — v2_fo +2.75% vs v1_full +5.37% (−2.61pp WORSE).**
+In-sample F&O gain importance 14.4% (used, not ignored) but OOS worse → overfitting to noise.
+Block t-stat +1.19 (not significant). PIT test PASS — not a leak (a leak would make v2 look
+*better*; it's worse). Neither model beats buy-and-hold (+6.12%). Do not deploy v2_fo.
+Full results in CHANGELOG.md (Checkpoint 7.2).
+
+**Goal:** Retrain with real `pcr_oi` / `pcr_volume` / `net_oi_change` (3-yr depth).
+Honest head-to-head vs +5.37% price/volume baseline from Checkpoint 6.
+
+**Scripts:**
+- `scripts/run_fo_training.py` — trains v2_fo model to `models/v2_fo/`
+  - Same date range as v1_full (2023-07-05 → 2026-07-03) → identical test timestamps
+  - Feature honesty stamped in provenance.json
+- `scripts/run_fo_evaluation.py` — rigorous evaluation:
+  - Part 1: PIT leakage test (D-1 rule verification)
+  - Part 2: Calibration reliability on sealed test set
+  - Part 3: After-cost benchmark + buy-and-hold comparison
+  - Part 4: Per-month breakdown across ~9 months OOS (fold-5 val + test set)
+  - Part 5: Block t-stat across monthly P&L buckets
+  - Part 6: Regime breakdown (bull vs bear days by median return_1d)
+  - Part 7: F&O feature importance (headline metric — zero importance = no edge)
+  - Part 8: Head-to-head v2_fo vs v1_full on identical test timestamps
+
+**Status:**
+- [x] Scripts written and syntax-checked
+- [x] Dry-run passed (all 16 features, 783 timestamps/symbol, all gates open)
+- [x] Training run complete — 109/109 symbols, 115 min, `models/v2_fo/` saved
+- [x] Evaluation run complete — 195 OOS days (fold-5 val 117d + test 78d)
+- [x] `pip install pytz` into .venv (DuckDB timestamptz→datetime for `_fetch_entry_prices`)
+- [x] Update CHANGELOG.md with results
+- [x] Honest verdict: **NO — F&O OI does not add edge; it degrades the model by 2.61pp**
+
+**Feature honesty:**
+- `pcr_oi`, `pcr_volume`, `net_oi_change` — REAL, 3-yr depth
+- `spot_futures_basis` — PARTIAL (~3 months, active contracts only)
+- `max_pain_distance` — NULL/ZERO (ATM-only OI; no per-strike breakdown)
+- Sentiment — ALL ZERO (no historical news feed)
+
+### Checkpoint 6.1 — Stress Test + Corrected Evaluation (2026-07-15) ✅
+
+**The +37.66% result was WRONG. Corrected headline: +5.37% — trailing buy-and-hold (+6.12%).**
+
+- [x] **Exit-price bug found and fixed** (`scripts/run_evaluation_v2.py`, `_exit_price()`):
+      SHORT+BEARISH trades used `entry*(1-PROFIT_PCT)` = −1% exit. BEARISH label fires at
+      `entry*(1-STOP_PCT)` = −0.5% (the actual barrier crossed). Overstated every SHORT profit 2×.
+      Fix: `entry*(1-STOP_PCT)` = −0.5% for SHORT profit. 663 trades · Rs161,404 overstatement.
+- [x] **Corrected benchmarks** (78-day sealed test set, real costs + 4 bps slippage):
+      Model: +5.37% | Buy-and-hold: +6.12% | Always-short: −13.35% | Always-flat: 0%
+      **Model trails buy-and-hold by 0.75pp. No demonstrated edge.**
+- [x] **Regime check**: Market was BULLISH +19.02% cumulative over test period (9/16 weeks bullish).
+      Model P&L: bullish weeks +2.93%, bearish weeks +2.44% — not pure regime-riding.
+      "Always short" lost −13.35% — model selection skill outperforms blind shorting but not B&H.
+- [x] **Slippage sensitivity**: +5 extra bps → +1.20%; +10 bps → −2.96%. Thin margin.
+- [x] **Statistical power**: Block t-stat = 1.11 (5 blocks of 15 days). NOT significant (need |t|>2).
+      Effective N ≈ 5 blocks, not 1,361 trades. Cannot reject H₀: no edge.
+- [x] **Leakage re-check**: All features PIT-clean (code review). Test set strictly after dev set. ✓
+- [x] **Final verdict**: No demonstrated edge for price/volume-only model on large-cap NSE.
+      Expected — price/volume signals rapidly arbitraged. Add F&O+news, re-validate on longer window.
+- [x] New script: `scripts/run_stress_test.py`
+
 ### Remaining Phase 4
 - [ ] Stage-2 full scoring (FinBERT + models + regime → top-10)
 - [ ] Selection-bias guard (higher confidence bar for cherry-picked top-10)

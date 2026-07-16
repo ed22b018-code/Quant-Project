@@ -2,6 +2,339 @@
 
 ---
 
+## Checkpoint 7.2 — Retrain WITH F&O Features + Rigorous Evaluation (2026-07-17) ✅
+
+### Verdict: F&O OI does NOT add edge — it slightly DEGRADES the model
+
+Retrained the 109-symbol universe with real F&O features (`pcr_oi`, `pcr_volume`,
+`net_oi_change`, `spot_futures_basis`) using the *same* walk-forward + purge/embargo and
+*same* date range as v1_full. Model saved to `models/v2_fo/` (`model_type: FO_AUGMENTED`).
+
+Head-to-head on identical sealed-test timestamps (only the model differs; v1 trained with
+F&O = all-zero, v2 with real F&O):
+
+| Model | Trades | Net P&L | % pool | vs baseline |
+|---|---|---|---|---|
+| v1_full (price/vol only) | 1,361 | +₹26,836 | **+5.37%** | — |
+| **v2_fo (FO-augmented)** | 1,300 | +₹13,768 | **+2.75%** | **−2.61 pp** |
+| Buy-and-hold | — | +₹30,606 | +6.12% | — |
+
+Live v1_full re-run reproduced Checkpoint 6 **exactly** (₹26,836 / +5.37% / 1,361 trades) —
+confirms the evaluation harness is trustworthy.
+
+### Why this is overfitting to noise, not signal
+
+- **F&O in-sample gain importance = 14.4%** (spot_futures_basis 4.5%, pcr_volume 3.3%,
+  pcr_oi 3.3%, net_oi_change 3.2%). The model *actively used* the features and still lost
+  2.61pp OOS. High in-sample importance + worse OOS = textbook noise-fitting.
+- Tell within the tell: the top F&O feature (`spot_futures_basis`, 4.5%) has only ~3 months
+  of real data (rest zeros) — the model leaning hardest on the thinnest feature.
+- Block t-stat **+1.19** (mean monthly +0.264%, std 0.700%, n=10) — NOT significant. Even
+  v2_fo's own +2.75% is indistinguishable from zero.
+
+### Not a leak (the "too good to be true" check)
+
+A daily-OI-in-intraday leak would make v2 look artificially *better*, not worse — we got the
+opposite. Corroborating:
+- **PIT test PASS** — probe at t0=2026-07-01 shows max-visible date = 2026-06-30 (D−1); the
+  same-day row is correctly blocked by `WHERE date < CAST(? AS DATE)` in `fo.py`.
+- Dominance check clean — top feature `atr_20d` (32.6%) is only 2.6× the second, below the
+  5× leak-flag threshold. No single F&O feature dominates implausibly.
+
+### Bottom line
+
+Daily ATM OI ratios are already priced into price/volume for large-cap NSE stocks; adding
+them costs 2.61pp via noise-fitting. **Do not deploy v2_fo; v1_full remains the better
+model.** Bigger strategic flag: neither model beats buy-and-hold (+6.12%) after costs.
+
+### Fixes / infra
+
+- `pip install pytz` into `.venv` — DuckDB requires it to convert `timestamptz` columns
+  (`ohlcv_intraday.ts`) to Python datetime in `_fetch_entry_prices`. First eval run crashed
+  at the P&L stage without it.
+- `scripts/run_fo_training.py` — trains v2_fo; stamps per-feature honesty in provenance.
+- `scripts/run_fo_evaluation.py` — 8-section rigorous eval (PIT, calibration, after-cost
+  P&L, per-month block t-stat, regime, F&O importance, head-to-head, verdict). Evaluates
+  195 OOS days = fold-5 val (117d) + sealed test (78d).
+
+---
+
+## Checkpoint 7.1 — F&O OI Historical Download (2026-07-16) ✅
+
+### Summary
+
+Populated `fo_daily_metrics` with 3 years of ATM CE/PE OI via Dhan rollingoption API.
+69,196 rows upserted. `pcr_oi`, `pcr_volume`, `net_oi_change` now non-zero across the
+109-symbol universe. Price/volume-only baseline (+5.37%) is now ready for the F&O
+feature uplift test (Checkpoint 7.2 — pending user approval to retrain).
+
+### API limit discovered
+
+Dhan rollingoption rejects requests with span ≥47 calendar days with `HTTP 400 "Missing required
+fields"`. The initial assumption of a 90-day limit was wrong. Empirically confirmed:
+
+```
+45-day span (end − start = 44) → HTTP 200 ✓
+46-day span (end − start = 45) → HTTP 200 ✓
+47-day span (end − start = 46) → HTTP 400 ✗
+```
+
+`CHUNK_DAYS = 45` used throughout (2-day safety margin).
+
+### Bugs found and fixed
+
+**Bug 1 — FUTSTK secId lookup (`run_fo_oi_download.py`, `_get_secid()`)**
+
+Dhan instrument master stores futures contracts as `RELIANCE-Jul2026-FUT`, not `RELIANCE`.
+The original `WHERE symbol = 'RELIANCE'` query found nothing for all 109 symbols.
+
+```python
+# Before (broken)
+_get_secid(db, "RELIANCE", "FUTSTK")   # no match
+
+# After (fixed)
+_get_secid(db, "RELIANCE-%", "FUTSTK") # matches RELIANCE-Jul2026-FUT
+```
+
+**Bug 2 — NA boolean evaluation (`dhan_downloader.py:1038`)**
+
+`compute_fo_metrics()` crashed on `row["oi"] or 0` when `row["oi"]` is `pandas.NA`:
+
+```
+TypeError: boolean value of NA is ambiguous
+```
+
+Fix:
+```python
+# Before
+oi_val = float(row["oi"] or 0)
+
+# After
+oi_val = 0.0 if pd.isna(row["oi"]) else float(row["oi"])
+```
+
+**Bug 3 — sys.path for `src.*` imports (`run_fo_oi_download.py`)**
+
+`from src.db.schema import DUCKDB_SCHEMA_SQL` failed with `ModuleNotFoundError` when the script
+was launched via `Start-Process python scripts\run_fo_oi_download.py` (script directory added to
+`sys.path`, not project root). Fixed by inserting project root at startup:
+
+```python
+sys.path.insert(0, str(Path(__file__).parent.parent))
+```
+
+### Final coverage
+
+| Timeframe   | Done  | Partial | Failed | Total |  % Done |
+|---|---|---|---|---|---|
+| FO_CE_ATM   | 2,496 |     229 |      0 | 2,725 |     92% |
+| FO_PE_ATM   | 2,521 |     204 |      0 | 2,725 |     93% |
+| FO_FUT_HIST | 2,477 |       0 |    248 | 2,725 |     91% |
+| FO_FUT_1M   |   300 |   3,437 |    296 | 4,033 |      7% |
+
+`fo_history` rows: **212,539** | `fo_daily_metrics` rows: **69,196** | `fo_futures_oi_minute` rows: **1,201,891**
+
+FUT_1M coverage is 7% because Dhan only returns OI for the currently-active contract;
+expired contract months return HTTP 400. FUT_HIST (daily bar OI) fared better at 91%
+because near-expiry daily contract data has broader retention on Dhan's side.
+
+### Feature availability
+
+| Feature | Status | Notes |
+|---|---|---|
+| `pcr_oi` | ✓ populated — 3-yr depth | CE/PE ATM OI ratio |
+| `pcr_volume` | ✓ populated — 3-yr depth | CE/PE ATM volume ratio |
+| `net_oi_change` | ✓ populated — 3-yr depth | daily OI delta via LAG |
+| `spot_futures_basis` | partial — ~3 months | only active contract months available |
+| `max_pain_distance` | NULL | ATM-only build; no per-strike OI |
+
+---
+
+## Checkpoint 6.1 — Stress Test + Corrected Evaluation (2026-07-15) ✅
+
+### Summary
+
+The +37.66% headline from Checkpoint 6 was **wrong**. A systematic stress test
+found an exit-price bug that overstated SHORT trade profits by 2×. Corrected
+result: **+5.37% net, trailing buy-and-hold (+6.12%) by 0.75pp**. No demonstrated
+edge for a price/volume-only model on large-cap NSE. This is the expected finding.
+
+### Exit-price bug found and fixed
+
+**File:** `scripts/run_evaluation_v2.py`, `_exit_price()` function.
+
+The BEARISH label fires when price falls by `STOP_PCT` (0.5%) — the lower barrier.
+For SHORT+BEARISH trades, the original code returned `entry * (1 - PROFIT_PCT)`
+= −1% exit. But the label only guarantees a −0.5% move. The extra 0.5% exit never
+actually happened. This doubled the P&L on every SHORT profit trade.
+
+```
+BEFORE (wrong): SHORT+BEARISH → exit at entry * (1 - 0.010) = −1.0%
+AFTER  (fixed): SHORT+BEARISH → exit at entry * (1 - 0.005) = −0.5%
+```
+
+Impact: 663 SHORT profit trades · average Rs50k position · 0.5% overstatement =
+**Rs161,404 gross overstatement (32.28% of pool)**.
+
+### Corrected results
+
+| Strategy | Net P&L | % of pool |
+|---|---|---|
+| **Model (corrected)** | **+Rs26,836** | **+5.37%** |
+| ~~Model (original, wrong)~~ | ~~+Rs188,308~~ | ~~+37.66%~~ |
+| Buy-and-hold (equal-weight) | +Rs30,606 | +6.12% |
+| Always-short (all 109 symbols) | −Rs66,751 | −13.35% |
+
+Model trails buy-and-hold by **0.75pp**. No demonstrated edge.
+
+### Regime check findings
+
+- Test period (March–July 2026) was **BULLISH**: +19.02% cumulative, 9/16 weeks up.
+- Model P&L: bullish-market weeks +2.93%, bearish-market weeks +2.44%.
+- Not regime-riding: edge is split near-evenly across market conditions.
+- "Always short all 109 symbols" lost −13.35% (wrong direction + cost drain).
+- Model's selection skill outperforms blind shorting by ~18pp, but still trails
+  a passive buy-and-hold because the test period was predominantly bullish.
+
+### Slippage sensitivity (corrected base)
+
+| Extra bps at barrier | Net P&L | % pool |
+|---|---|---|
+| 0 bps (base) | +Rs26,836 | +5.37% |
+| +3 bps | +Rs14,344 | +2.87% |
+| +5 bps | +Rs6,016 | +1.20% |
+| +10 bps | −Rs14,805 | −2.96% |
+| +20 bps | −Rs56,445 | −11.29% |
+
+Model breaks even at ~+7 bps additional barrier slippage. Thin margin.
+
+### Statistical power
+
+Block t-stat = **1.11** (5 blocks of 15 days each). **Not significant** (need |t| > 2).
+Naive t-stat (4.13) is misleading — consecutive same-symbol trades are correlated.
+Effective sample size is ~5 independent blocks, not 1,361 trades.
+Cannot reject H₀: no edge above costs for a price/volume-only model.
+
+### Leakage re-check (all clean)
+
+- Daily features: `WHERE date < CAST(as_of AS DATE)` — strict, uses prior-day EOD ✓
+- Intraday features: `WHERE ts < as_of` — excludes the 9:30 IST entry bar ✓
+- Test set: first test t0 = 2026-03-18, last dev t0 = 2026-03-17 — strictly separated ✓
+- Purge/embargo: zero training t1 crosses val boundary (proven in test_labels.py) ✓
+- Execution assumption (not leakage): features use 9:29 IST close, entry at 9:30 IST close
+
+### New files
+
+- `scripts/run_stress_test.py` — exit-price fix, regime check, slippage sensitivity,
+  block t-stat, leakage code review; all attacks in one reproducible script
+
+### Final verdict
+
+**No demonstrated edge for a PRICE/VOLUME-ONLY model on large-cap NSE.**
+This is the expected result: price/volume signals are widely known and rapidly
+arbitraged in liquid markets. The model does show selection skill (outperforms
+blind shorting by ~18pp) but cannot overcome a rising-market passive long position.
+
+**Next step:** Add F&O and news/sentiment features when data is available.
+Re-validate on a significantly longer out-of-sample window (≥6 months).
+
+---
+
+## Checkpoint 6 — Full Training + Honest Evaluation (2026-07-15) ✅
+
+### Summary
+
+First real 109-symbol training run on 3 years of Dhan intraday data.
+**Model type: PRICE_VOLUME_ONLY** — F&O and sentiment features are all-zero.
+Results must not be compared against a model that uses F&O or news data.
+
+### Pipeline bugs fixed
+
+**Bug 1 — 3× dataset duplication (timeframe filter)**
+`_build_for_symbol_worker` queried `ohlcv_intraday` without `AND timeframe='1'`.
+All five timeframes (1/5/15/25/60-min) have a bar at 9:30 IST. Without the filter,
+each daily feature timestamp matched three rows (1-min, 5-min, 15-min), tripling
+the dataset with mixed-timeframe labels and corrupting the label distribution.
+Fix: added `AND timeframe='1'` to the SQL query.
+
+**Bug 2 — Zero training rows (F&O NaN + dropna)**
+`fo_daily_metrics` table is empty (F&O download deferred). All 5 F&O features are
+100% NaN. `dropna(subset=feature_cols + ["label"])` dropped every row → 0 training
+rows → no model trained.
+Fix: `df[df["label"].notna()].copy()` then `fillna(0.0)` on feature columns.
+
+**Bug 3 — Silent stdout buffering**
+Python uses block buffering (8 KB) when stdout is redirected to a file. All print()
+stage headers appeared only at process exit. Fix: `flush=True` on every print() call
+in `training_pipeline.py` and `scripts/run_full_training.py`.
+
+**Bug 4 — IST timestamp filter in evaluation (EXTRACT(HOUR) mismatch)**
+`_fetch_entry_prices` and the buy-and-hold benchmark used `EXTRACT(HOUR FROM ts) = 4`
+(UTC assumption). DB stores IST timezone-aware timestamps: 9:30 IST bar has `HOUR=9`.
+Result: 0 rows returned → all 1,361 trades skipped → benchmark shows all-zero P&L.
+Fix: changed to `EXTRACT(HOUR FROM ts) = 9 AND EXTRACT(MINUTE FROM ts) = 30` in both queries.
+
+### New files
+
+- `scripts/run_full_training.py` — 109-symbol training driver; prints FEATURE HONESTY STAMP;
+  stamps `model_type: "PRICE_VOLUME_ONLY"` + `feature_honesty` dict into provenance.json
+- `scripts/run_evaluation_v2.py` — honest evaluation: calibration reliability diagrams,
+  after-cost backtest (real CostSimulator), benchmark table, per-month breakdown,
+  feature importance + leakage check, verdict
+
+### Modified files
+
+- `src/models/training_pipeline.py` — progress logging (per-symbol counter, stage banners,
+  ETA, `flush=True` on all print calls); `AND timeframe='1'` filter; F&O-NaN fix
+
+### Training run stats
+
+| Metric | Value |
+|---|---|
+| Symbols | 109 |
+| Date range | 2023-07-05 to 2026-07-03 |
+| CPU cores | 6/8 (75%) |
+| Total time | 64m 23s |
+| Dataset rows | 85,347 |
+| Walk-forward folds | 5 |
+| Sealed test rows | 8,534 |
+| Calibration | isotonic regression (12,038 val samples) |
+
+### Evaluation results (sealed test set, 78 days)
+
+**Calibration:**
+- BEARISH: well-calibrated at 0.15–0.55 (gaps < 0.013); degrades above 0.65 (sparse)
+- NO_TRADE: well-calibrated throughout (max gap 0.114, Brier 0.2208)
+- BULLISH: overconfident (sparse class: only 556/7714 test rows; Brier 0.0678)
+
+**After-cost backtest (real NSE costs + 4 bps round-trip slippage, ₹5L pool):**
+
+| Strategy | Net P&L | % of pool |
+|---|---|---|
+| **Model (net of costs)** | **+₹1,88,308** | **+37.66% ← HEADLINE** |
+| Model (gross) | +₹2,85,176 | +57.04% |
+| Buy-and-hold (equal-weight) | +₹30,606 | +6.12% |
+| Random entry (same freq) | −₹3,346 | −0.67% |
+| Always-flat | ₹0 | 0.00% |
+
+Trades: 1,361 | Profit bar: 49.7% | Stop: 13.2% | Time (flat): 37.1%
+
+**Per-month:** Mar +9.3%, Apr +14.8%, May +9.2%, Jun +3.4%, Jul (partial) +1.0%
+
+**Feature importance:** atr_20d > intraday_momentum > vwap_deviation > return_1d > volume_ratio_20d.
+All F&O/sentiment features: zero importance ✓ (correctly ignored by LightGBM).
+
+**Verdict:** POTENTIAL EDGE — model beats random and buy-and-hold net of all costs.
+⚠️ Caveats: 78-day test window; approximate barrier exit prices; heavy bearish bias (17% BEARISH,
+0.6% BULLISH predictions) may coincide with 2026 market regime; price/volume only.
+Do NOT deploy until F&O + news features are added and re-validated.
+
+### Model files
+
+`models/v1_full/` — scenario_classifier/ (LightGBM) + provenance.json (with model_type stamp).
+
+---
+
 ## Checkpoint 5.2 — Capital Allocation + Guardrails (2026-07-14) ✅
 
 ### New files
